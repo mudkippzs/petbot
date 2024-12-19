@@ -1,0 +1,11 @@
+{
+    "welcome_message": "Welcome to MoguMoguBot! Manage your pets and their owners.",
+    "help_title": "Help & Commands",
+    "help_description": "Below is a list of all available commands.",
+    "backup_message": "Here's the latest database backup:",
+    "pet_singular": "Pet",
+    "pet_plural": "Pets",
+    "owner_singular": "Owner",
+    "owner_plural": "Owners",
+    "server_staff": "Server Staff"
+}
