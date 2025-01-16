@@ -1,6 +1,7 @@
 # ./cogs/reputation.py
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
+from discord.commands import SlashCommandGroup
 from discord import Option
 from loguru import logger
 from typing import TYPE_CHECKING, Optional, List, Dict
@@ -13,6 +14,8 @@ class ReputationCog(commands.Cog):
     Cog for managing reputation and reviews of subs.
     Allows users to add ratings and comments, and view aggregated reviews.
     """
+
+    review_group = SlashCommandGroup("reputation", "Add a review and rating for someone.")
 
     def __init__(self, bot: "MoguMoguBot"):
         self.bot = bot
@@ -30,13 +33,7 @@ class ReputationCog(commands.Cog):
         )
         return [dict(r) for r in rows]
 
-    @commands.slash_command(name="review", description="Manage sub reviews.")
-    async def review_group(self, ctx: discord.ApplicationContext):
-        """Base command group for reviewing subs."""
-        if ctx.guild is None:
-            await ctx.respond("This command can only be used in a server.", ephemeral=True)
-
-    @review_group.sub_command(name="add", description="Add a review and rating for a sub.")
+    @review_group.command(name="add", description="Add a review and rating for a sub.")
     async def review_add(self,
                          ctx: discord.ApplicationContext,
                          sub_id: int,
@@ -67,7 +64,7 @@ class ReputationCog(commands.Cog):
         await ctx.followup.send("Thank you for your review!")
         logger.info(f"User {ctx.author.id} added a review for sub {sub_id}, rating={rating}, comment={comment}")
 
-    @review_group.sub_command(name="view", description="View aggregated ratings and recent reviews for a sub.")
+    @review_group.command(name="view", description="View aggregated ratings and recent reviews for a sub.")
     async def review_view(self,
                           ctx: discord.ApplicationContext,
                           sub_id: int):

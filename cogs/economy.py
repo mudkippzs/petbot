@@ -1,5 +1,6 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
+from discord.commands import SlashCommandGroup
 from discord import Option, Interaction
 from loguru import logger
 from typing import TYPE_CHECKING, Optional, Any, Dict, List
@@ -15,6 +16,9 @@ class EconomyCog(commands.Cog):
     - moderated: transactions above a certain amount (e.g. >1000) need staff approval
     - strict: all transactions require staff approval
     """
+
+    economy_group = SlashCommandGroup("economy", "Commands to interact with the economy.")
+    staff_economy_group = SlashCommandGroup("staff_economy", "Staff commands to interact with the economy.")
 
     def __init__(self, bot: "MoguMoguBot"):
         self.bot = bot
@@ -113,7 +117,7 @@ class EconomyCog(commands.Cog):
             return True
         return False
 
-    @commands.slash_command(name="economy_info", description="Learn about the current economy mode and rules.")
+    @economy_group.command(name="economy_info", description="Learn about the current economy mode and rules.")
     async def economy_info(self, ctx: discord.ApplicationContext):
         await ctx.defer(ephemeral=True)
         if ctx.guild is None:
@@ -131,7 +135,7 @@ class EconomyCog(commands.Cog):
         )
         await ctx.followup.send(msg)
 
-    @commands.slash_command(name="tip", description="Tip a user or sub. Use 'sub:<id>' to tip a sub.")
+    @economy_group.command(name="tip", description="Tip a user or sub. Use 'sub:<id>' to tip a sub.")
     async def tip_cmd(self,
                       ctx: discord.ApplicationContext,
                       recipient: Option(str, "User mention or 'sub:<id>'"),
@@ -272,7 +276,7 @@ class EconomyCog(commands.Cog):
 
             await ctx.followup.send("Choose a tip amount:", view=view)
 
-    @commands.slash_command(name="transfer", description="Transfer funds to another user.")
+    @economy_group.command(name="transfer", description="Transfer funds to another user.")
     async def transfer_cmd(self, ctx: discord.ApplicationContext, user: discord.User, amount: int):
         await ctx.defer(ephemeral=True)
         if ctx.guild is None:
@@ -308,13 +312,7 @@ class EconomyCog(commands.Cog):
             tx_id = await self.create_transaction(sender_id, recipient_id, amount, justification, "completed")
             await ctx.followup.send(f"Transfer of {amount} to <@{recipient_id}> completed! (TX: {tx_id})")
 
-    @commands.slash_command(name="staff", description="Staff-only economy approvals.")
-    async def staff_group(self, ctx: discord.ApplicationContext):
-        # Base group; no direct action
-        if ctx.guild is None:
-            await ctx.respond("This command can only be used in a server.", ephemeral=True)
-
-    @staff_group.sub_command(name="approve_transaction", description="Approve a pending transaction.")
+    @staff_economy_group.command(name="approve_transaction", description="Approve a pending transaction.")
     async def staff_approve(self, ctx: discord.ApplicationContext, tx_id: int):
         await ctx.defer(ephemeral=True)
         if ctx.guild is None:
@@ -333,7 +331,7 @@ class EconomyCog(commands.Cog):
         else:
             await ctx.followup.send(f"Failed to approve transaction: {message}")
 
-    @staff_group.sub_command(name="deny_transaction", description="Deny a pending transaction.")
+    @staff_economy_group.command(name="deny_transaction", description="Deny a pending transaction.")
     async def staff_deny(self, ctx: discord.ApplicationContext, tx_id: int):
         await ctx.defer(ephemeral=True)
         if ctx.guild is None:
@@ -352,14 +350,7 @@ class EconomyCog(commands.Cog):
         else:
             await ctx.followup.send(f"Failed to deny transaction: {message}")
 
-    @commands.slash_command(name="config", description="Server configuration commands.")
-    async def config_group(self, ctx: discord.ApplicationContext):
-        # This is a parent group for config-related commands defined in another file
-        # We'll ensure no conflicts arise as previously planned.
-        if ctx.guild is None:
-            await ctx.respond("This command can only be used in a server.", ephemeral=True)
-
-    @config_group.sub_command(name="economy_mode", description="Set the server's economy mode.")
+    @staff_economy_group.command(name="economy_mode", description="Set the server's economy mode.")
     async def config_economy_mode(self, ctx: discord.ApplicationContext,
                                   mode: Option(str, "Economy mode: open, moderated, strict", choices=["open", "moderated", "strict"])):
         await ctx.defer(ephemeral=True)

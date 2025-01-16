@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands, tasks
+from discord.commands import SlashCommandGroup
 from discord import Option
 from loguru import logger
 from typing import TYPE_CHECKING, Optional
@@ -19,6 +20,9 @@ class AuctionMarketplaceCog(commands.Cog):
     - Direct offers to owners
     - Automatic ending of auctions after their end time
     """
+
+    auction_group = SlashCommandGroup("auction", "Commands for the Auction.")
+    offer_group = SlashCommandGroup("proposal", "Commands for sending proposals to owners.")
 
     def __init__(self, bot: "MoguMoguBot"):
         self.bot = bot
@@ -195,15 +199,7 @@ class AuctionMarketplaceCog(commands.Cog):
         await self.bot.db.execute("UPDATE auctions SET active=FALSE WHERE id=$1;", auction_id)
         logger.info(f"Auction {auction_id} finalized. Winner: {winner_id}, Amount: {sale_amount}, Type: {auction_type}, Manual: {bool(manual_actor_id)}")
 
-    @commands.slash_command(name="auction", description="Manage auctions for sub ownership, services, or leasing.")
-    async def auction_group(self, ctx: discord.ApplicationContext):
-        """Base command group for auctions."""
-        # If DMs, deny command:
-        if ctx.guild is None:
-            await ctx.respond("This command can only be used in a server.", ephemeral=True)
-            return
-
-    @auction_group.sub_command(name="create", description="Create a new auction.")
+    @auction_group.command(name="create", description="Create a new auction.")
     async def auction_create(self,
                              ctx: discord.ApplicationContext,
                              sub_id: int,
@@ -284,7 +280,7 @@ class AuctionMarketplaceCog(commands.Cog):
             logger.exception(f"Failed to create auction for sub {sub_id}: {e}")
             await ctx.followup.send("Failed to create auction. Please try again later.")
 
-    @auction_group.sub_command(name="bid", description="Place a bid on an active auction.")
+    @auction_group.command(name="bid", description="Place a bid on an active auction.")
     async def auction_bid(self, ctx: discord.ApplicationContext, auction_id: int, amount: int):
         await ctx.defer(ephemeral=True)
         if ctx.guild is None:
@@ -322,7 +318,7 @@ class AuctionMarketplaceCog(commands.Cog):
         await ctx.followup.send(f"Your bid of {amount} has been placed on auction #{auction_id}.")
         logger.info(f"User {ctx.author.id} placed bid {amount} on auction {auction_id}.")
 
-    @auction_group.sub_command(name="end", description="Manually end an auction and finalize results.")
+    @auction_group.command(name="end", description="Manually end an auction and finalize results.")
     async def auction_end(self, ctx: discord.ApplicationContext, auction_id: int):
         await ctx.defer(ephemeral=True)
         if ctx.guild is None:
@@ -346,7 +342,7 @@ class AuctionMarketplaceCog(commands.Cog):
         await self.finalize_auction(auction_id, manual_actor_id=ctx.author.id)
         await ctx.followup.send(f"Auction #{auction_id} has been ended and finalized.")
 
-    @auction_group.sub_command(name="info", description="View information about an ongoing auction.")
+    @auction_group.command(name="info", description="View information about an ongoing auction.")
     async def auction_info(self, ctx: discord.ApplicationContext, auction_id: int):
         await ctx.defer(ephemeral=True)
         if ctx.guild is None:
@@ -409,14 +405,7 @@ class AuctionMarketplaceCog(commands.Cog):
         await ctx.followup.send(embed=embed)
 
 
-    @commands.slash_command(name="offer", description="Send direct offers to sub owners.")
-    async def offer_group(self, ctx: discord.ApplicationContext):
-        """Base command group for handling direct offers."""
-        if ctx.guild is None:
-            await ctx.respond("This command can only be used in a server.", ephemeral=True)
-            return
-
-    @offer_group.sub_command(name="send", description="Send a direct offer to a sub's owners.")
+    @offer_group.command(name="send", description="Send a direct offer to a sub's owners.")
     async def offer_send(self,
                          ctx: discord.ApplicationContext,
                          sub_id: int,
@@ -447,7 +436,7 @@ class AuctionMarketplaceCog(commands.Cog):
         await ctx.followup.send(f"Your offer of {amount} for sub {sub_id} has been sent to the owners.")
         logger.info(f"User {ctx.author.id} made an offer of {amount} to sub {sub_id}, anonymous={anonymous}.")
 
-    @offer_group.sub_command(name="accept", description="Accept a pending offer made for your sub.")
+    @offer_group.command(name="accept", description="Accept a pending offer made for your sub.")
     async def offer_accept(self, ctx: discord.ApplicationContext, offer_id: int):
         await ctx.defer(ephemeral=True)
         if ctx.guild is None:
@@ -495,7 +484,7 @@ class AuctionMarketplaceCog(commands.Cog):
         await ctx.followup.send(f"Offer #{offer_id} accepted. <@{sender_id}> now owns sub {sub_id}.")
         logger.info(f"Offer {offer_id} accepted by {ctx.author.id}. Sub {sub_id} transferred to {sender_id}.")
 
-    @offer_group.sub_command(name="deny", description="Deny a pending offer made for your sub.")
+    @offer_group.command(name="deny", description="Deny a pending offer made for your sub.")
     async def offer_deny(self, ctx: discord.ApplicationContext, offer_id: int):
         await ctx.defer(ephemeral=True)
         if ctx.guild is None:

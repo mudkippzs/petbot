@@ -1,6 +1,7 @@
 # ./cogs/help.py
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
+from discord.commands import SlashCommandGroup
 from typing import TYPE_CHECKING, List
 from loguru import logger
 
@@ -125,7 +126,4 @@ class Help(commands.Cog):
         await ctx.followup.send(embed=embed)
 
 def setup(bot: "MoguMoguBot"):
-    """
-    Add the Help cog to the bot.
-    """
     bot.add_cog(Help(bot))

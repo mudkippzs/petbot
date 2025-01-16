@@ -1,321 +1,463 @@
-# ./cogs/contract_escrow.py
+# contract_escrow.py
 import discord
 from discord.ext import commands
-from discord import Option
+from discord.commands import SlashCommandGroup
+from typing import TYPE_CHECKING, Optional
 from loguru import logger
-from typing import TYPE_CHECKING, Optional, List, Dict
-from datetime import datetime
+import asyncio
+import datetime
+
+from contract_views import AdvertView, OfferCreationModal, ContractView
 
 if TYPE_CHECKING:
     from main import MoguMoguBot
 
+
+FEATURES = {
+    "enable_milestones": False,
+    "enable_partial_refund": False,
+    "enable_auto_cancel_timeout": False,
+    "enable_dispute_split": False,
+}
+
+
 class ContractEscrowCog(commands.Cog):
     """
-    Cog to manage service contracts between buyers and sub owners, with milestone-based payments held in escrow.
-    Buyers escrow full payment, and funds are released upon milestone approvals.
+    A cog to manage a contract/escrow system for buying and selling member services, 
+    with optional advanced features (milestones, partial refunds, etc.).
     """
+
+    # Slash command groups
+    contract_user_group = SlashCommandGroup(
+        "contract",
+        "User commands for creating adverts and handling offers/contracts."
+    )
+    contract_staff_group = SlashCommandGroup(
+        "staff_contract",
+        "Staff commands for moderating and resolving contract disputes."
+    )
 
     def __init__(self, bot: "MoguMoguBot"):
         self.bot = bot
+        # In a real environment, you might read toggles from e.g. self.bot.config["escrow_features"]
+        self.features = FEATURES
 
-    async def sub_exists(self, sub_id: int) -> bool:
-        """Check if a sub exists."""
-        row = await self.bot.db.fetchrow("SELECT id FROM subs WHERE id=$1;", sub_id)
-        return row is not None
-
-    async def service_exists_for_sub(self, sub_id: int, service_id: int) -> bool:
-        """Check if a service exists for the given sub."""
-        row = await self.bot.db.fetchrow("SELECT 1 FROM sub_services WHERE sub_id=$1 AND id=$2;", sub_id, service_id)
-        return row is not None
-
-    async def get_sub_primary_owner(self, sub_id: int) -> Optional[int]:
-        """Get the primary owner user_id of a sub."""
-        row = await self.bot.db.fetchrow("SELECT primary_owner_id FROM subs WHERE id=$1;", sub_id)
-        return row["primary_owner_id"] if row else None
-
-    async def user_balance(self, user_id: int) -> int:
-        """Get user's wallet balance."""
-        w = await self.bot.db.fetchrow("SELECT balance FROM wallets WHERE user_id=$1;", user_id)
-        return w["balance"] if w else 0
-
-    async def ensure_wallet(self, user_id: int):
-        """Ensure user has a wallet row, create if not exist."""
-        exists = await self.bot.db.fetchrow("SELECT 1 FROM wallets WHERE user_id=$1;", user_id)
-        if not exists:
-            await self.bot.db.execute("INSERT INTO wallets (user_id, balance) VALUES ($1,0);", user_id)
-
-    async def is_staff(self, member: discord.Member) -> bool:
-        """Check if member has a staff role."""
-        staff_roles = await self.bot.db.fetch("SELECT role_id FROM staff_roles;")
-        staff_role_ids = [r["role_id"] for r in staff_roles]
-        if not staff_role_ids:
-            return False
-        return any(role.id in staff_role_ids for role in member.roles)
-
-    async def get_contract(self, contract_id: int):
-        return await self.bot.db.fetchrow("SELECT * FROM contracts WHERE id=$1;", contract_id)
-
-    async def get_milestones(self, contract_id: int) -> List[Dict]:
-        rows = await self.bot.db.fetch("SELECT * FROM contract_milestones WHERE contract_id=$1 ORDER BY id;", contract_id)
-        return [dict(r) for r in rows]
-
-    @commands.slash_command(name="contract", description="Manage service contracts and escrow.")
-    async def contract_group(self, ctx: discord.ApplicationContext):
-        """Base command for contract-related operations."""
-        if ctx.guild is None:
-            await ctx.respond("This command can only be used in a server.", ephemeral=True)
-
-    @contract_group.sub_command(name="create", description="Create a new contract with escrowed payment and milestones.")
-    async def contract_create(self,
-                              ctx: discord.ApplicationContext,
-                              sub_id: int,
-                              service_id: int,
-                              total_price: int,
-                              milestones: Option(str, "Comma-separated descriptions of milestones, e.g. 'Draft,Review,Final'")):
+    # ---------------------------- USER COMMANDS ----------------------------
+    @contract_user_group.command(name="advert", description="Post a service advert that potential buyers can respond to.")
+    async def advert_cmd(self, ctx: discord.ApplicationContext):
+        """
+        Creates an embed in the #the-trading channel (or current channel) with an 'AdvertView.'
+        The user who ran this command is treated as the 'seller.'
+        """
         await ctx.defer(ephemeral=True)
-        if ctx.guild is None:
-            await ctx.followup.send("This command can only be used in a server.")
-            return
 
-        if not await self.sub_exists(sub_id):
-            await ctx.followup.send("Sub not found.")
-            return
-
-        if not await self.service_exists_for_sub(sub_id, service_id):
-            await ctx.followup.send("Service not found for this sub.")
-            return
-
-        if total_price <= 0:
-            await ctx.followup.send("Total price must be greater than 0.")
-            return
-
-        milestone_list = [m.strip() for m in milestones.split(",") if m.strip()]
-        if not milestone_list:
-            await ctx.followup.send("You must provide at least one milestone.")
-            return
-
-        seller_id = await self.get_sub_primary_owner(sub_id)
-        if seller_id is None:
-            await ctx.followup.send("Sub has no primary owner. Cannot create contract.")
-            return
-
-        # Ensure buyer has enough balance to escrow full amount
-        await self.ensure_wallet(ctx.author.id)
-        buyer_balance = await self.user_balance(ctx.author.id)
-        if buyer_balance < total_price:
-            await ctx.followup.send("You don't have enough balance to escrow this contract.")
-            return
-
-        # Deduct escrow from buyer
-        await self.bot.db.execute("UPDATE wallets SET balance=balance-$1 WHERE user_id=$2;", total_price, ctx.author.id)
-
-        # Create contract record
-        row = await self.bot.db.fetchrow(
-            "INSERT INTO contracts (buyer_id, sub_id, service_id, total_price, escrow_amount, status) VALUES ($1, $2, $3, $4, $5, 'active') RETURNING id;",
-            ctx.author.id, sub_id, service_id, total_price, total_price
+        # Build the embed
+        seller = ctx.author
+        embed = discord.Embed(
+            title="Service Advert",
+            description=(
+                f"**Seller:** {seller.mention}\n\n"
+                "React with 'Make Offer' if you're interested in hiring!"
+            ),
+            color=discord.Color.blurple(),
+            timestamp=datetime.datetime.utcnow()
         )
-        contract_id = row["id"]
+        embed.set_footer(text="Contract & Escrow System")
+        embed.set_author(name=str(seller), icon_url=seller.display_avatar.url)
 
-        # Insert milestones
-        for m in milestone_list:
-            await self.bot.db.execute(
-                "INSERT INTO contract_milestones (contract_id, description) VALUES ($1, $2);",
-                contract_id, m
-            )
+        def make_offer_callback(interaction: discord.Interaction):
+            """
+            Called when a potential buyer clicks 'Make Offer.'
+            We'll open a modal to gather info from them.
+            """
+            if interaction.user.id == seller.id:
+                # Seller can't make an offer to themselves
+                return asyncio.create_task(interaction.response.send_message(
+                    "You can't buy your own service!", ephemeral=True
+                ))
 
-        await ctx.followup.send(f"Contract #{contract_id} created and escrowed. {len(milestone_list)} milestones added.")
-        logger.info(f"Contract {contract_id} created by buyer {ctx.author.id} for sub {sub_id}, service {service_id}, price {total_price}.")
+            modal = OfferCreationModal()
+            # Once they submit, we handle the result in a follow-up callback:
+            async def modal_callback():
+                # This function runs after the user closes the modal
+                offer_msg = modal.offer_message.value
+                offer_price_str = modal.offer_price.value
+                # Validate price
+                try:
+                    offer_price = int(offer_price_str)
+                except ValueError:
+                    await interaction.followup.send(
+                        f"Invalid offer price: `{offer_price_str}`", 
+                        ephemeral=True
+                    )
+                    return
 
-    @contract_group.sub_command(name="approve_milestone", description="Approve a contract milestone as buyer or seller.")
-    async def contract_approve_milestone(self,
-                                         ctx: discord.ApplicationContext,
-                                         contract_id: int,
-                                         milestone_id: int):
-        await ctx.defer(ephemeral=True)
-        if ctx.guild is None:
-            await ctx.followup.send("This command can only be used in a server.")
-            return
+                # Check buyer's balance, etc.
+                buyer_id = interaction.user.id
+                buyer_balance = await self.get_user_balance(buyer_id)
+                if buyer_balance < offer_price:
+                    await interaction.followup.send(
+                        f"You don't have enough balance ({buyer_balance}) for this offer.",
+                        ephemeral=True
+                    )
+                    return
 
-        contract = await self.get_contract(contract_id)
-        if not contract:
-            await ctx.followup.send("Contract not found.")
-            return
+                # DM the seller with the offer details
+                seller_user = seller  # ctx.author
+                try:
+                    dm_channel = await seller_user.create_dm()
+                    accept_msg = (
+                        f"{interaction.user.mention} offers **{offer_price}**.\n\n"
+                        f"Message:\n```{offer_msg}```\n\n"
+                        "React ✅ to accept, ❌ to decline."
+                    )
+                    sent_dm = await dm_channel.send(accept_msg)
 
-        if contract["status"] not in ("active", "disputed"):
-            await ctx.followup.send("This contract is not active or is already completed/closed.")
-            return
+                    # Wait for reaction in DM
+                    await sent_dm.add_reaction("✅")
+                    await sent_dm.add_reaction("❌")
 
-        milestones = await self.get_milestones(contract_id)
-        milestone = next((m for m in milestones if m["id"] == milestone_id), None)
-        if not milestone:
-            await ctx.followup.send("Milestone not found.")
-            return
+                    def check_reaction(r, u):
+                        return (
+                            r.message.id == sent_dm.id 
+                            and u.id == seller_user.id
+                            and str(r.emoji) in ["✅", "❌"]
+                        )
 
-        buyer_id = contract["buyer_id"]
-        seller_id = await self.get_sub_primary_owner(contract["sub_id"])
-        if seller_id is None:
-            await ctx.followup.send("Seller not found. Cannot proceed.")
-            return
+                    try:
+                        reaction, user = await self.bot.wait_for(
+                            "reaction_add",
+                            timeout=60 * 30,  # 30 min 
+                            check=check_reaction
+                        )
+                        if str(reaction.emoji) == "✅":
+                            # Seller accepted => create the contract
+                            await self.create_contract(
+                                seller_id=seller_user.id,
+                                buyer_id=buyer_id,
+                                amount=offer_price,
+                                description=offer_msg,
+                                interaction=interaction
+                            )
+                        else:
+                            # Seller declined
+                            await dm_channel.send("You have **declined** the offer.")
+                            await interaction.followup.send(
+                                "Seller declined your offer.", ephemeral=True
+                            )
+                    except asyncio.TimeoutError:
+                        await dm_channel.send("Offer timed out. No action taken.")
+                        await interaction.followup.send(
+                            "Offer timed out—seller didn’t respond.", ephemeral=True
+                        )
+                except discord.Forbidden:
+                    # Seller's DMs might be off
+                    await interaction.followup.send(
+                        f"Could not DM {seller_user.mention}. They may have DMs disabled.",
+                        ephemeral=True
+                    )
 
-        # Check if ctx.author is buyer or seller
-        if ctx.author.id not in (buyer_id, seller_id):
-            await ctx.followup.send("Only the buyer or the seller can approve milestones.")
-            return
+            # Present the modal to the buyer
+            asyncio.create_task(interaction.response.send_modal(modal))
+            # Then we attach an on_complete to handle after they click submit
+            modal.wait()  # The modal flow
+            modal.on_submit = modal_callback  # Assign the callback for post-submit
 
-        # Update approval status
-        if ctx.author.id == buyer_id and not milestone["approved_by_buyer"]:
-            await self.bot.db.execute("UPDATE contract_milestones SET approved_by_buyer=TRUE WHERE id=$1;", milestone_id)
-        elif ctx.author.id == seller_id and not milestone["approved_by_seller"]:
-            await self.bot.db.execute("UPDATE contract_milestones SET approved_by_seller=TRUE WHERE id=$1;", milestone_id)
-        else:
-            await ctx.followup.send("You have already approved this milestone or there's nothing to approve.")
-            return
+        def delete_advert_callback(interaction: discord.Interaction):
+            """
+            Called when the seller (or authorized user) clicks 'Delete Advert.'
+            """
+            if interaction.user.id != seller.id:
+                return asyncio.create_task(
+                    interaction.response.send_message(
+                        "Only the seller can delete this advert.", ephemeral=True
+                    )
+                )
+            # Delete the original advert message
+            asyncio.create_task(interaction.message.delete())
 
-        await ctx.followup.send(f"Milestone {milestone_id} approved.")
-        logger.info(f"User {ctx.author.id} approved milestone {milestone_id} in contract {contract_id}.")
+        advert_view = AdvertView(
+            on_make_offer=make_offer_callback,
+            on_delete_advert=delete_advert_callback
+        )
 
-        # Re-fetch milestones to ensure fresh data
-        updated_milestones = await self.get_milestones(contract_id)
-        all_approved = all(m["approved_by_buyer"] and m["approved_by_seller"] for m in updated_milestones)
+        # Post the embed + view to the channel. 
+        # In your environment, you might want a #the-trading channel specifically.
+        channel = ctx.channel
+        sent_msg = await channel.send(embed=embed, view=advert_view)
+        await ctx.followup.send("Advert posted!", ephemeral=True)
 
-        if all_approved:
-            # Release funds to seller
-            total_price = contract["total_price"]
-            await self.bot.db.execute("UPDATE wallets SET balance=balance+$1 WHERE user_id=$2;", total_price, seller_id)
-            await self.bot.db.execute("UPDATE contracts SET status='completed' WHERE id=$1;", contract_id)
-            await ctx.followup.send(
-                f"All milestones approved! Contract #{contract_id} completed. Seller has been paid {total_price}.",
+    # ---------------------------- CONTRACT CREATION ----------------------------
+    async def create_contract(self, seller_id: int, buyer_id: int, amount: int, description: str, interaction: discord.Interaction):
+        """
+        Deducts buyer's funds (escrow) and posts a contract embed with a ContractView.
+        Called when the seller accepts an offer.
+        """
+        # 1) Deduct funds from the buyer
+        success = await self.deduct_user_balance(buyer_id, amount)
+        if not success:
+            await interaction.followup.send(
+                "Failed to deduct funds from the buyer’s wallet—contract aborted.",
                 ephemeral=True
             )
-            logger.info(f"Contract {contract_id} completed. Seller {seller_id} paid {total_price}.")
-
-    @contract_group.sub_command(name="dispute", description="Raise a dispute for a contract.")
-    async def contract_dispute(self,
-                               ctx: discord.ApplicationContext,
-                               contract_id: int):
-        await ctx.defer(ephemeral=True)
-        if ctx.guild is None:
-            await ctx.followup.send("This command can only be used in a server.")
             return
 
-        contract = await self.get_contract(contract_id)
-        if not contract:
-            await ctx.followup.send("Contract not found.")
-            return
+        # 2) Insert DB record for contract. 
+        #    For demonstration, we skip the actual DB code and just show an embed.
+        contract_id = await self.db_insert_contract_record(
+            buyer_id=buyer_id,
+            seller_id=seller_id,
+            amount=amount,
+            description=description
+        )
 
-        if contract["status"] not in ("active", "disputed"):
-            await ctx.followup.send("This contract is not currently active, so no dispute can be raised.")
-            return
+        # 3) Build an embed for the contract
+        buyer_mention = f"<@{buyer_id}>"
+        seller_mention = f"<@{seller_id}>"
+        embed = discord.Embed(
+            title=f"Contract #{contract_id}",
+            description=(
+                f"**Seller:** {seller_mention}\n"
+                f"**Buyer:** {buyer_mention}\n\n"
+                f"**Amount:** {amount}\n\n"
+                f"**Description:**\n```{description}```"
+            ),
+            color=discord.Color.gold(),
+            timestamp=datetime.datetime.utcnow()
+        )
+        embed.set_footer(text="Contract is held in escrow until completed or canceled.")
 
-        buyer_id = contract["buyer_id"]
-        seller_id = await self.get_sub_primary_owner(contract["sub_id"])
-        if seller_id is None:
-            await ctx.followup.send("Seller not found. Cannot proceed.")
-            return
+        # 4) Create the ContractView
+        contract_view = ContractView(
+            buyer_id=buyer_id,
+            seller_id=seller_id,
+            on_fulfill_complete=self.on_fulfill_complete,
+            on_cancel_complete=self.on_cancel_complete,
+            on_dispute=self.on_dispute
+        )
 
-        if ctx.author.id not in (buyer_id, seller_id):
-            await ctx.followup.send("Only the buyer or the seller can raise a dispute.")
-            return
+        # 5) Post to #the-trading or another channel
+        channel = interaction.channel
+        await channel.send(embed=embed, view=contract_view)
+        await interaction.followup.send(
+            f"Contract #{contract_id} created. Escrow of {amount} deducted from buyer.",
+            ephemeral=True
+        )
 
-        await self.bot.db.execute("UPDATE contracts SET status='disputed' WHERE id=$1;", contract_id)
-        await ctx.followup.send(f"Contract #{contract_id} is now in dispute. A staff member will resolve it.")
-        logger.info(f"Contract {contract_id} disputed by {ctx.author.id}.")
+    # ---------------------------- CONTRACT VIEW CALLBACKS ----------------------------
+    async def on_fulfill_complete(self, interaction: discord.Interaction):
+        """
+        Both parties pressed 'Fulfill,' so we release escrow to the seller.
+        """
+        # Identify contract from message or embed if needed
+        # For simplicity, assume contract_id is embedded in the message or parse it
+        contract_id = self.parse_contract_id_from_embed(interaction.message.embeds[0])
+        # Mark in DB as completed
+        contract_data = await self.db_get_contract(contract_id)
+        if not contract_data:
+            return await interaction.followup.send("Contract record not found. Something's off.", ephemeral=True)
 
-    @contract_group.sub_command(name="resolve_dispute", description="Staff command to resolve a disputed contract.")
-    async def contract_resolve_dispute(self,
-                                       ctx: discord.ApplicationContext,
-                                       contract_id: int,
-                                       outcome: Option(str, "Resolution outcome: 'buyer_refund', 'seller_payout', 'split'",
-                                                       choices=["buyer_refund", "seller_payout", "split"])):
-        await ctx.defer(ephemeral=True)
-        if ctx.guild is None:
-            await ctx.followup.send("This command can only be used in a server.")
-            return
+        buyer_id = contract_data["buyer_id"]
+        seller_id = contract_data["seller_id"]
+        amount = contract_data["amount"]
+        # Release funds to seller
+        await self.add_user_balance(seller_id, amount)
 
-        contract = await self.get_contract(contract_id)
-        if not contract:
-            await ctx.followup.send("Contract not found.")
-            return
+        await self.db_update_contract_status(contract_id, "completed")
+        await interaction.response.send_message(
+            f"Contract #{contract_id} is now fulfilled! {amount} was paid to <@{seller_id}>.",
+            ephemeral=False
+        )
 
-        if contract["status"] != "disputed":
-            await ctx.followup.send("This contract is not in disputed status.")
-            return
+    async def on_cancel_complete(self, interaction: discord.Interaction):
+        """
+        Both parties pressed 'Cancel,' so we return funds to the buyer.
+        """
+        contract_id = self.parse_contract_id_from_embed(interaction.message.embeds[0])
+        contract_data = await self.db_get_contract(contract_id)
+        if not contract_data:
+            return await interaction.followup.send("Contract record not found. Something's off.", ephemeral=True)
 
-        member = ctx.author if isinstance(ctx.author, discord.Member) else ctx.guild.get_member(ctx.author.id)
-        if not member or not await self.is_staff(member):
-            await ctx.followup.send("Only staff can resolve disputes.")
-            return
+        buyer_id = contract_data["buyer_id"]
+        seller_id = contract_data["seller_id"]
+        amount = contract_data["amount"]
 
-        buyer_id = contract["buyer_id"]
-        seller_id = await self.get_sub_primary_owner(contract["sub_id"])
-        if seller_id is None:
-            await ctx.followup.send("Cannot identify seller. Cannot resolve dispute this way.")
-            return
+        # Refund buyer
+        await self.add_user_balance(buyer_id, amount)
 
-        escrow_amount = contract["escrow_amount"]
-        if escrow_amount <= 0:
-            await ctx.followup.send("No escrow amount to distribute.")
-            return
+        await self.db_update_contract_status(contract_id, "canceled")
+        await interaction.response.send_message(
+            f"Contract #{contract_id} canceled. Refunded {amount} back to <@{buyer_id}>.",
+            ephemeral=False
+        )
 
-        # Ensure wallets
-        await self.ensure_wallet(buyer_id)
-        await self.ensure_wallet(seller_id)
+    async def on_dispute(self, interaction: discord.Interaction):
+        """
+        Either party pressed 'Dispute.' We alert staff in a staff-only channel or do the direct staff flow.
+        """
+        contract_id = self.parse_contract_id_from_embed(interaction.message.embeds[0])
+        contract_data = await self.db_get_contract(contract_id)
+        if not contract_data:
+            return await interaction.response.send_message("Contract record not found.", ephemeral=True)
 
-        if outcome == "buyer_refund":
-            await self.bot.db.execute("UPDATE wallets SET balance=balance+$1 WHERE user_id=$2;", escrow_amount, buyer_id)
-            await self.bot.db.execute("UPDATE contracts SET status='closed' WHERE id=$1;", contract_id)
-            await ctx.followup.send(f"Contract #{contract_id} dispute resolved: All {escrow_amount} returned to buyer.")
-        elif outcome == "seller_payout":
-            await self.bot.db.execute("UPDATE wallets SET balance=balance+$1 WHERE user_id=$2;", escrow_amount, seller_id)
-            await self.bot.db.execute("UPDATE contracts SET status='closed' WHERE id=$1;", contract_id)
-            await ctx.followup.send(f"Contract #{contract_id} dispute resolved: All {escrow_amount} paid to seller.")
-        else:  # split
-            half = escrow_amount // 2
-            remainder = escrow_amount % 2
-            await self.bot.db.execute("UPDATE wallets SET balance=balance+$1 WHERE user_id=$2;", half, buyer_id)
-            await self.bot.db.execute("UPDATE wallets SET balance=balance+$1 WHERE user_id=$2;", half + remainder, seller_id)
-            await self.bot.db.execute("UPDATE contracts SET status='closed' WHERE id=$1;", contract_id)
-            await ctx.followup.send(
-                f"Contract #{contract_id} dispute resolved: {half} to buyer, {half + remainder} to seller."
+        buyer_id = contract_data["buyer_id"]
+        seller_id = contract_data["seller_id"]
+        amount = contract_data["amount"]
+
+        # Mark DB as 'disputed'
+        await self.db_update_contract_status(contract_id, "disputed")
+
+        staff_channel_id = 123456789012345678  # Replace with your staff channel
+        staff_channel = self.bot.get_channel(staff_channel_id)
+        if not staff_channel:
+            return await interaction.response.send_message(
+                "Staff channel not configured properly. Dispute noted but no staff alert sent.",
+                ephemeral=True
             )
 
-        logger.info(f"Staff {ctx.author.id} resolved dispute for contract {contract_id} with outcome {outcome}.")
+        embed = discord.Embed(
+            title=f"Contract Dispute #{contract_id}",
+            description=(
+                f"**Buyer:** <@{buyer_id}>\n"
+                f"**Seller:** <@{seller_id}>\n"
+                f"**Amount:** {amount}\n"
+                f"**Status:** Disputed"
+            ),
+            color=discord.Color.red(),
+            timestamp=datetime.datetime.utcnow()
+        )
+        embed.set_footer(text="Staff, please resolve via /contractstaff commands if needed.")
 
-    @contract_group.sub_command(name="info", description="View contract details including milestones and statuses.")
-    async def contract_info(self, ctx: discord.ApplicationContext, contract_id: int):
+        await staff_channel.send(content="A dispute has been raised:", embed=embed)
+        await interaction.response.send_message(
+            "Dispute raised. Staff has been notified. Contract is on hold.", ephemeral=True
+        )
+
+    # ---------------------------- STAFF COMMANDS ----------------------------
+    @contract_staff_group.command(name="resolve_dispute", description="Resolve a disputed contract by forcibly awarding or refunding.")
+    @commands.has_role("Admin")
+    async def staff_resolve_dispute(self, ctx: discord.ApplicationContext, contract_id: int, resolution: str):
+        """
+        Admin-only command to forcibly resolve a disputed contract.
+        'resolution' can be 'refund_buyer', 'pay_seller', or 'split' if you want partial.
+        """
         await ctx.defer(ephemeral=True)
-        if ctx.guild is None:
-            await ctx.followup.send("This command can only be used in a server.")
-            return
+        contract_data = await self.db_get_contract(contract_id)
+        if not contract_data:
+            return await ctx.followup.send("Contract not found.", ephemeral=True)
 
-        contract = await self.get_contract(contract_id)
-        if not contract:
-            await ctx.followup.send("Contract not found.")
-            return
+        if contract_data["status"] != "disputed":
+            return await ctx.followup.send("Contract is not in a 'disputed' state.", ephemeral=True)
 
-        milestones = await self.get_milestones(contract_id)
-        buyer_id = contract["buyer_id"]
-        seller_id = await self.get_sub_primary_owner(contract["sub_id"])
-        seller_str = f"<@{seller_id}>" if seller_id else "Unknown"
+        buyer_id = contract_data["buyer_id"]
+        seller_id = contract_data["seller_id"]
+        amount = contract_data["amount"]
 
-        embed = discord.Embed(title=f"Contract #{contract_id}", color=0x2F3136)
-        embed.add_field(name="Sub ID", value=str(contract["sub_id"]), inline=True)
-        embed.add_field(name="Service ID", value=str(contract["service_id"]), inline=True)
-        embed.add_field(name="Status", value=contract["status"], inline=True)
-        embed.add_field(name="Buyer", value=f"<@{buyer_id}>", inline=False)
-        embed.add_field(name="Seller", value=seller_str, inline=False)
-        embed.add_field(name="Total Price", value=str(contract["total_price"]), inline=True)
-        embed.add_field(name="Escrowed Amount", value=str(contract["escrow_amount"]), inline=True)
+        if resolution == "refund_buyer":
+            await self.add_user_balance(buyer_id, amount)
+            await self.db_update_contract_status(contract_id, "staff_refund")
+            await ctx.followup.send(
+                f"Contract #{contract_id} forcibly refunded to buyer <@{buyer_id}>.",
+                ephemeral=True
+            )
+        elif resolution == "pay_seller":
+            await self.add_user_balance(seller_id, amount)
+            await self.db_update_contract_status(contract_id, "staff_payout")
+            await ctx.followup.send(
+                f"Contract #{contract_id} forcibly paid out to seller <@{seller_id}>.",
+                ephemeral=True
+            )
+        elif resolution == "split" and self.features.get("enable_dispute_split", False):
+            # Example partial logic: 50/50
+            half = amount // 2
+            remainder = amount % 2
+            await self.add_user_balance(buyer_id, half)
+            await self.add_user_balance(seller_id, half + remainder)
+            await self.db_update_contract_status(contract_id, "staff_split")
+            await ctx.followup.send(
+                f"Contract #{contract_id} forcibly split: Buyer got {half}, Seller got {half + remainder}.",
+                ephemeral=True
+            )
+        else:
+            await ctx.followup.send("Invalid resolution or 'split' feature not enabled.", ephemeral=True)
 
-        if milestones:
-            m_str = ""
-            for m in milestones:
-                check_buyer = "✔" if m["approved_by_buyer"] else "✘"
-                check_seller = "✔" if m["approved_by_seller"] else "✘"
-                m_str += f"**#{m['id']}**: {m['description']}\nBuyer: {check_buyer}, Seller: {check_seller}\n"
-            embed.add_field(name="Milestones", value=m_str, inline=False)
+    # ---------------------------- HELPER METHODS ----------------------------
+    async def get_user_balance(self, user_id: int) -> int:
+        """
+        Example method for retrieving a user's wallet balance from your DB.
+        Replace with your actual DB calls or self.bot.db usage.
+        """
+        # Pseudo-code:
+        row = await self.bot.db.fetchrow("SELECT balance FROM wallets WHERE user_id=$1;", user_id)
+        return row["balance"] if row else 0
 
-        await ctx.followup.send(embed=embed)
+    async def add_user_balance(self, user_id: int, amount: int) -> bool:
+        """
+        Add 'amount' to user's wallet. Return True if success, else False.
+        """
+        try:
+            await self.bot.db.execute("UPDATE wallets SET balance=balance+$1 WHERE user_id=$2;", amount, user_id)
+            return True
+        except Exception as e:
+            logger.exception(f"Failed to add balance: {e}")
+            return False
+
+    async def deduct_user_balance(self, user_id: int, amount: int) -> bool:
+        """
+        Subtract 'amount' from user's wallet. Return True if success, else False.
+        """
+        # You might want to check the user's existing balance and if not enough, fail.
+        try:
+            balance = await self.get_user_balance(user_id)
+            if balance < amount:
+                return False
+            await self.bot.db.execute("UPDATE wallets SET balance=balance-$1 WHERE user_id=$2;", amount, user_id)
+            return True
+        except Exception as e:
+            logger.exception(f"Failed to deduct balance: {e}")
+            return False
+
+    async def db_insert_contract_record(self, buyer_id: int, seller_id: int, amount: int, description: str) -> int:
+        """
+        Create a row in 'contracts' table, return the contract_id. 
+        Adjust fields as needed for your schema.
+        """
+        row = await self.bot.db.fetchrow(
+            """
+            INSERT INTO contracts (buyer_id, seller_id, amount, description, status)
+            VALUES ($1, $2, $3, $4, 'active')
+            RETURNING id
+            """,
+            buyer_id, seller_id, amount, description
+        )
+        return row["id"]
+
+    async def db_update_contract_status(self, contract_id: int, status: str):
+        """
+        Update contract status in DB.
+        """
+        await self.bot.db.execute(
+            "UPDATE contracts SET status=$1 WHERE id=$2;", status, contract_id
+        )
+
+    async def db_get_contract(self, contract_id: int) -> Optional[dict]:
+        """
+        Retrieve a contract record from DB by id.
+        """
+        row = await self.bot.db.fetchrow("SELECT * FROM contracts WHERE id=$1;", contract_id)
+        return dict(row) if row else None
+
+    def parse_contract_id_from_embed(self, embed: discord.Embed) -> Optional[int]:
+        """
+        Helper to parse contract ID from an embed's title or content.
+        E.g., if embed.title is "Contract #123"
+        """
+        if embed.title and "Contract #" in embed.title:
+            try:
+                return int(embed.title.split("#")[1])
+            except:
+                pass
+        return None
 
 def setup(bot: "MoguMoguBot"):
     bot.add_cog(ContractEscrowCog(bot))

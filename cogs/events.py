@@ -1,6 +1,7 @@
 # ./cogs/events.py
 import discord
 from discord.ext import commands, tasks
+from discord.commands import SlashCommandGroup
 from discord import Option
 from loguru import logger
 from typing import TYPE_CHECKING, Optional
@@ -14,6 +15,8 @@ class EventsCog(commands.Cog):
     Cog for managing temporary events (voice or text) for subs.
     Owners can create event channels that auto-delete after the event ends.
     """
+
+    event_group = SlashCommandGroup("events", "Commands to create and manage events.")    
 
     def __init__(self, bot: "MoguMoguBot"):
         self.bot = bot
@@ -66,14 +69,7 @@ class EventsCog(commands.Cog):
         await self.bot.wait_until_ready()
         logger.info("Event auto-end loop started.")
 
-    @commands.slash_command(name="event", description="Manage temporary events for subs.")
-    async def event_group(self, ctx: discord.ApplicationContext):
-        """Base command group for event-related operations."""
-        # If no subcommand is provided, just show a generic help
-        if ctx.guild is None:
-            await ctx.respond("This command can only be used in a server.", ephemeral=True)
-
-    @event_group.sub_command(name="create", description="Create a new temporary event channel for a sub.")
+    @event_group.command(name="create", description="Create a new temporary event channel for a sub.")
     async def event_create(self,
                            ctx: discord.ApplicationContext,
                            sub_id: int,
@@ -168,7 +164,7 @@ class EventsCog(commands.Cog):
         )
         logger.info(f"Event {event_id} created for sub {sub_id} by {ctx.author.id}, channel {channel.id}, type={type}.")
 
-    @event_group.sub_command(name="end", description="End an ongoing event.")
+    @event_group.command(name="end", description="End an ongoing event.")
     async def event_end(self,
                         ctx: discord.ApplicationContext,
                         event_id: int):
@@ -206,7 +202,7 @@ class EventsCog(commands.Cog):
         await ctx.followup.send(f"Event #{event_id} ended and channel removed.")
         logger.info(f"Event {event_id} ended by user {ctx.author.id}.")
 
-    @event_group.sub_command(name="info", description="View information about a current event.")
+    @event_group.command(name="info", description="View information about a current event.")
     async def event_info(self,
                          ctx: discord.ApplicationContext,
                          event_id: int):

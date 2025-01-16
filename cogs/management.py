@@ -1,6 +1,7 @@
 # ./cogs/management.py
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
+from discord.commands import SlashCommandGroup
 from discord import Option
 from loguru import logger
 from typing import TYPE_CHECKING, Any, Dict, Optional
@@ -18,6 +19,8 @@ class ManagementCog(commands.Cog):
     All commands in this cog require staff permissions.
     """
 
+    management = SlashCommandGroup("manage", "Commands for managing server configuration.")
+    
     def __init__(self, bot: "MoguMoguBot"):
         self.bot = bot
 
@@ -48,25 +51,7 @@ class ManagementCog(commands.Cog):
         row = await self.bot.db.fetchrow("SELECT value FROM server_config WHERE key=$1;", key)
         return row["value"] if row else None
 
-    @commands.slash_command(name="config", description="Server configuration commands.")
-    async def config_group(self, ctx: discord.ApplicationContext):
-        """
-        Base command group for configuration.
-        """
-        await ctx.defer(ephemeral=True)
-        if ctx.guild is None:
-            await ctx.followup.send("This command can only be used in a server.")
-            return
-        
-        member = ctx.author if isinstance(ctx.author, discord.Member) else ctx.guild.get_member(ctx.author.id)
-        if not member or not await self.is_staff(member):
-            await ctx.followup.send("Only staff can access configuration commands.")
-            return
-
-        # If no subcommand is called, just provide a hint.
-        await ctx.followup.send("Use a subcommand to configure the server settings.")
-
-    @config_group.sub_command(name="feature", description="Enable or disable a feature.")
+    @management.command(name="feature", description="Enable or disable a feature.")
     async def config_feature(self,
                              ctx: discord.ApplicationContext,
                              feature_name: str,
@@ -86,7 +71,7 @@ class ManagementCog(commands.Cog):
         await ctx.followup.send(f"Feature '{feature_name}' set to {state}.")
         logger.info(f"Feature '{feature_name}' set to {state} by user {ctx.author.id}.")
 
-    @config_group.sub_command(name="add_staff_role", description="Add a role as staff.")
+    @management.command(name="add_staff_role", description="Add a role as staff.")
     async def config_add_staff_role(self, ctx: discord.ApplicationContext, role: discord.Role):
         await ctx.defer(ephemeral=True)
         if ctx.guild is None:
@@ -102,7 +87,7 @@ class ManagementCog(commands.Cog):
         await ctx.followup.send(f"Role {role.mention} added as a staff role.")
         logger.info(f"Staff role {role.id} added by user {ctx.author.id}.")
 
-    @config_group.sub_command(name="remove_staff_role", description="Remove a staff role.")
+    @management.command(name="remove_staff_role", description="Remove a staff role.")
     async def config_remove_staff_role(self, ctx: discord.ApplicationContext, role: discord.Role):
         await ctx.defer(ephemeral=True)
         if ctx.guild is None:
@@ -118,23 +103,8 @@ class ManagementCog(commands.Cog):
         await ctx.followup.send(f"Role {role.mention} removed from staff roles.")
         logger.info(f"Staff role {role.id} removed by user {ctx.author.id}.")
 
-    @config_group.sub_command(name="backup", description="Manage backup settings.")
-    async def config_backup_group(self, ctx: discord.ApplicationContext):
-        await ctx.defer(ephemeral=True)
-        if ctx.guild is None:
-            await ctx.followup.send("This command can only be used in a server.")
-            return
-
-        member = ctx.author if isinstance(ctx.author, discord.Member) else ctx.guild.get_member(ctx.author.id)
-        if not member or not await self.is_staff(member):
-            await ctx.followup.send("Only staff can manage backups.")
-            return
-
-        # If no subcommand is called here, just provide a hint.
-        await ctx.followup.send("Use a backup subcommand to configure backup settings.")
-
-    @config_backup_group.sub_command(name="add_user", description="Add a user as a backup recipient.")
-    async def config_backup_add_user(self, ctx: discord.ApplicationContext, user: discord.User):
+    @management.command(name="add_user", description="Add a user as a backup recipient.")
+    async def config_group_add_user(self, ctx: discord.ApplicationContext, user: discord.User):
         await ctx.defer(ephemeral=True)
         if ctx.guild is None:
             await ctx.followup.send("This command can only be used in a server.")
@@ -149,8 +119,8 @@ class ManagementCog(commands.Cog):
         await ctx.followup.send(f"User <@{user.id}> added as a backup recipient.")
         logger.info(f"Backup recipient {user.id} added by user {ctx.author.id}.")
 
-    @config_backup_group.sub_command(name="remove_user", description="Remove a user from backup recipients.")
-    async def config_backup_remove_user(self, ctx: discord.ApplicationContext, user: discord.User):
+    @management.command(name="remove_user", description="Remove a user from backup recipients.")
+    async def config_group_remove_user(self, ctx: discord.ApplicationContext, user: discord.User):
         await ctx.defer(ephemeral=True)
         if ctx.guild is None:
             await ctx.followup.send("This command can only be used in a server.")
@@ -165,8 +135,8 @@ class ManagementCog(commands.Cog):
         await ctx.followup.send(f"User <@{user.id}> removed from backup recipients.")
         logger.info(f"Backup recipient {user.id} removed by user {ctx.author.id}.")
 
-    @config_backup_group.sub_command(name="channel", description="Set the channel where backups are posted.")
-    async def config_backup_channel(self, ctx: discord.ApplicationContext, channel: discord.TextChannel):
+    @management.command(name="channel", description="Set the channel where backups are posted.")
+    async def config_group_channel(self, ctx: discord.ApplicationContext, channel: discord.TextChannel):
         await ctx.defer(ephemeral=True)
         if ctx.guild is None:
             await ctx.followup.send("This command can only be used in a server.")
@@ -182,8 +152,8 @@ class ManagementCog(commands.Cog):
         await ctx.followup.send(f"Backup channel set to {channel.mention}.")
         logger.info(f"Backup channel set to {channel.id} by user {ctx.author.id}.")
 
-    @config_backup_group.sub_command(name="interval", description="Set the backup interval in minutes.")
-    async def config_backup_interval(self, ctx: discord.ApplicationContext, minutes: int):
+    @management.command(name="interval", description="Set the backup interval in minutes.")
+    async def config_group_interval(self, ctx: discord.ApplicationContext, minutes: int):
         await ctx.defer(ephemeral=True)
         if ctx.guild is None:
             await ctx.followup.send("This command can only be used in a server.")
