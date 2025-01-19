@@ -45,13 +45,6 @@ class EconomyCog(commands.Cog):
             await self.bot.db.execute("INSERT INTO wallets (user_id, balance) VALUES ($1,0) ON CONFLICT DO NOTHING;", user_id)
         return True
 
-    async def is_staff(self, member: discord.Member) -> bool:
-        staff_roles = await self.bot.db.fetch("SELECT role_id FROM staff_roles;")
-        staff_role_ids = [r["role_id"] for r in staff_roles]
-        if not staff_role_ids:
-            return False
-        return any(role.id in staff_role_ids for role in member.roles)
-
     async def user_balance(self, user_id: int) -> int:
         row = await self.bot.db.fetchrow("SELECT balance FROM wallets WHERE user_id=$1;", user_id)
         if row:
@@ -277,6 +270,7 @@ class EconomyCog(commands.Cog):
             await ctx.followup.send("Choose a tip amount:", view=view)
 
     @economy_group.command(name="transfer", description="Transfer funds to another user.")
+    @commands.has_any_role("Gentleman", "Harlot", "Boss", "Underboss", "Consigliere")
     async def transfer_cmd(self, ctx: discord.ApplicationContext, user: discord.User, amount: int):
         await ctx.defer(ephemeral=True)
         if ctx.guild is None:
@@ -313,15 +307,11 @@ class EconomyCog(commands.Cog):
             await ctx.followup.send(f"Transfer of {amount} to <@{recipient_id}> completed! (TX: {tx_id})")
 
     @staff_economy_group.command(name="approve_transaction", description="Approve a pending transaction.")
+    @commands.has_any_role("Boss", "Underboss", "Consigliere")
     async def staff_approve(self, ctx: discord.ApplicationContext, tx_id: int):
         await ctx.defer(ephemeral=True)
         if ctx.guild is None:
             await ctx.followup.send("This command can only be used in a server.")
-            return
-
-        member = ctx.author if isinstance(ctx.author, discord.Member) else ctx.guild.get_member(ctx.author.id)
-        if not member or not await self.is_staff(member):
-            await ctx.followup.send("You must be staff to use this command.")
             return
 
         success, message = await self.approve_transaction(tx_id)
@@ -332,15 +322,11 @@ class EconomyCog(commands.Cog):
             await ctx.followup.send(f"Failed to approve transaction: {message}")
 
     @staff_economy_group.command(name="deny_transaction", description="Deny a pending transaction.")
+    @commands.has_any_role("Boss", "Underboss", "Consigliere")
     async def staff_deny(self, ctx: discord.ApplicationContext, tx_id: int):
         await ctx.defer(ephemeral=True)
         if ctx.guild is None:
             await ctx.followup.send("This command can only be used in a server.")
-            return
-
-        member = ctx.author if isinstance(ctx.author, discord.Member) else ctx.guild.get_member(ctx.author.id)
-        if not member or not await self.is_staff(member):
-            await ctx.followup.send("You must be staff to use this command.")
             return
 
         success, message = await self.deny_transaction(tx_id)
@@ -351,16 +337,12 @@ class EconomyCog(commands.Cog):
             await ctx.followup.send(f"Failed to deny transaction: {message}")
 
     @staff_economy_group.command(name="economy_mode", description="Set the server's economy mode.")
+    @commands.has_any_role("Boss")
     async def config_economy_mode(self, ctx: discord.ApplicationContext,
                                   mode: Option(str, "Economy mode: open, moderated, strict", choices=["open", "moderated", "strict"])):
         await ctx.defer(ephemeral=True)
         if ctx.guild is None:
             await ctx.followup.send("This command can only be used in a server.")
-            return
-
-        member = ctx.author if isinstance(ctx.author, discord.Member) else ctx.guild.get_member(ctx.author.id)
-        if not member or not await self.is_staff(member):
-            await ctx.followup.send("Only staff can change economy mode.")
             return
 
         await self.set_economy_mode(mode)

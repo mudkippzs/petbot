@@ -165,6 +165,7 @@ class EventsCog(commands.Cog):
         logger.info(f"Event {event_id} created for sub {sub_id} by {ctx.author.id}, channel {channel.id}, type={type}.")
 
     @event_group.command(name="end", description="End an ongoing event.")
+    @commands.has_any_role("Gentleman", "Boss", "Underboss", "Consigliere")
     async def event_end(self,
                         ctx: discord.ApplicationContext,
                         event_id: int):
@@ -203,6 +204,7 @@ class EventsCog(commands.Cog):
         logger.info(f"Event {event_id} ended by user {ctx.author.id}.")
 
     @event_group.command(name="info", description="View information about a current event.")
+    @commands.has_any_role("Gentleman", "Harlot", "Boss", "Underboss", "Consigliere")
     async def event_info(self,
                          ctx: discord.ApplicationContext,
                          event_id: int):

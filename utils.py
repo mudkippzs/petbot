@@ -2,9 +2,12 @@
 import json
 import csv
 import aiohttp
-from loguru import logger
 import asyncio
 import aiofiles
+
+from discord.ext import commands
+from discord import Guild
+from loguru import logger
 from typing import Any, Dict, List, Optional
 
 
@@ -84,33 +87,3 @@ async def get_highest_dict_key(dictionary: Dict[Any, Any]) -> Optional[Any]:
     # Minimal async simulation:
     await asyncio.sleep(0)
     return max(dictionary, key=lambda k: dictionary[k])
-
-
-async def tenor(search_term: str, api_key: str, lmt: int = 5) -> Optional[str]:
-    """
-    Asynchronously fetch a GIF URL from Tenor based on a search term.
-
-    Parameters:
-        search_term (str): The term to search for.
-        api_key (str): Tenor API key.
-        lmt (int): Limit of results to fetch.
-
-    Returns:
-        Optional[str]: A direct URL to a GIF if found, otherwise None.
-    """
-    url = f"https://tenor.googleapis.com/v2/search?q={search_term}&key={api_key}&limit={lmt}"
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as r:
-                if r.status == 200:
-                    data = await r.json()
-                    results = data.get("results", [])
-                    if results and "media_formats" in results[0] and "gif" in results[0]["media_formats"]:
-                        return results[0]["media_formats"]["gif"]["url"]
-                    else:
-                        logger.warning(f"No valid GIF found for search: {search_term}")
-                else:
-                    logger.error(f"Failed to fetch GIF from Tenor. Status code: {r.status}")
-    except Exception as e:
-        logger.exception(f"Tenor request failed for {search_term}: {e}")
-    return None

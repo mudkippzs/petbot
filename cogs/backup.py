@@ -36,14 +36,14 @@ class BackupCog(commands.Cog):
         # Start the backup task on load
         self.backup_task.add_exception_type(Exception)
         self.backup_task.change_interval(minutes=self.interval)
-        self.backup_task.start()
+        #self.backup_task.start()
 
     def cog_unload(self):
         """Called when the cog is unloaded. Cancels the backup loop."""
         self.backup_task.cancel()
 
     # ------------------ REGULAR BACKUP LOOP ------------------
-    @tasks.loop(minutes=15)
+    @tasks.loop(minutes=30)
     async def backup_task(self):
         """
         Periodic task loop to create and send a database backup.
@@ -219,20 +219,10 @@ class BackupCog(commands.Cog):
         logger.info("Database connection pool re-created after restore.")
         return True
 
-    # ------------------ STAFF CHECK ------------------
-    async def is_staff(self, member: discord.Member) -> bool:
-        """
-        Check if the given member has any of the configured staff roles.
-        """
-        staff_rows = await self.bot.db.fetch("SELECT role_id FROM staff_roles;")
-        staff_role_ids = [r["role_id"] for r in staff_rows]
-        if not staff_role_ids:
-            return False
-        return any(role.id in staff_role_ids for role in member.roles)
-
     # ------------------ COMMANDS ------------------
 
-    @backup_group.command(name="now", description="Manually trigger an immediate backup.")    
+    @backup_group.command(name="now", description="Manually trigger an immediate backup.")
+    @commands.has_any_role("Boss")
     async def backup_now(self, ctx: discord.ApplicationContext):
         """
         Staff command to manually trigger a database backup right now.
@@ -240,17 +230,14 @@ class BackupCog(commands.Cog):
         # Check guild & staff
         if ctx.guild is None:
             await ctx.respond("This command can only be used in a server.", ephemeral=True)
-            return
-        member = ctx.author if isinstance(ctx.author, discord.Member) else ctx.guild.get_member(ctx.author.id)
-        if not member or not await self.is_staff(member):
-            await ctx.respond("You must be staff to perform this action.", ephemeral=True)
-            return
+            return        
 
         await ctx.defer(ephemeral=True)
         await self.do_backup()
         await ctx.followup.send("Manual backup completed and sent to configured recipients.", ephemeral=True)
 
     @backup_group.command(name="restore", description="Restore the database from a given SQL dump URL (staff-only).")
+    @commands.has_any_role("Boss")
     async def backup_restore(self, ctx: discord.ApplicationContext, url: str):
         """
         Staff command to restore the entire database from a SQL dump file hosted at <url>.
@@ -267,11 +254,7 @@ class BackupCog(commands.Cog):
         if ctx.guild is None:
             await ctx.respond("This command can only be used in a server.", ephemeral=True)
             return
-        member = ctx.author if isinstance(ctx.author, discord.Member) else ctx.guild.get_member(ctx.author.id)
-        if not member or not await self.is_staff(member):
-            await ctx.respond("You must be staff to perform this action.", ephemeral=True)
-            return
-
+        
         await ctx.defer(ephemeral=True)
         # 1) Create a fallback backup
         await ctx.followup.send("Creating a backup of the **current** database before restoring...", ephemeral=True)

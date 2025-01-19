@@ -200,6 +200,7 @@ class AuctionMarketplaceCog(commands.Cog):
         logger.info(f"Auction {auction_id} finalized. Winner: {winner_id}, Amount: {sale_amount}, Type: {auction_type}, Manual: {bool(manual_actor_id)}")
 
     @auction_group.command(name="create", description="Create a new auction.")
+    @commands.has_any_role("Gentleman", "Boss")
     async def auction_create(self,
                              ctx: discord.ApplicationContext,
                              sub_id: int,
@@ -281,6 +282,7 @@ class AuctionMarketplaceCog(commands.Cog):
             await ctx.followup.send("Failed to create auction. Please try again later.")
 
     @auction_group.command(name="bid", description="Place a bid on an active auction.")
+    @commands.has_any_role("Gentleman", "Boss")
     async def auction_bid(self, ctx: discord.ApplicationContext, auction_id: int, amount: int):
         await ctx.defer(ephemeral=True)
         if ctx.guild is None:
@@ -318,7 +320,8 @@ class AuctionMarketplaceCog(commands.Cog):
         await ctx.followup.send(f"Your bid of {amount} has been placed on auction #{auction_id}.")
         logger.info(f"User {ctx.author.id} placed bid {amount} on auction {auction_id}.")
 
-    @auction_group.command(name="end", description="Manually end an auction and finalize results.")
+    @auction_group.command(name="end", description="Manually end an auction and finalize results.")    
+    @commands.has_any_role("Gentleman", "Boss")
     async def auction_end(self, ctx: discord.ApplicationContext, auction_id: int):
         await ctx.defer(ephemeral=True)
         if ctx.guild is None:
@@ -343,6 +346,7 @@ class AuctionMarketplaceCog(commands.Cog):
         await ctx.followup.send(f"Auction #{auction_id} has been ended and finalized.")
 
     @auction_group.command(name="info", description="View information about an ongoing auction.")
+    @commands.has_any_role("Gentleman", "Boss")
     async def auction_info(self, ctx: discord.ApplicationContext, auction_id: int):
         await ctx.defer(ephemeral=True)
         if ctx.guild is None:
@@ -405,7 +409,8 @@ class AuctionMarketplaceCog(commands.Cog):
         await ctx.followup.send(embed=embed)
 
 
-    @offer_group.command(name="send", description="Send a direct offer to a sub's owners.")
+    @offer_group.command(name="send", description="Send a direct offer to a sub's owners.")    
+    @commands.has_any_role("Gentleman")
     async def offer_send(self,
                          ctx: discord.ApplicationContext,
                          sub_id: int,
@@ -436,7 +441,8 @@ class AuctionMarketplaceCog(commands.Cog):
         await ctx.followup.send(f"Your offer of {amount} for sub {sub_id} has been sent to the owners.")
         logger.info(f"User {ctx.author.id} made an offer of {amount} to sub {sub_id}, anonymous={anonymous}.")
 
-    @offer_group.command(name="accept", description="Accept a pending offer made for your sub.")
+    @offer_group.command(name="accept", description="Accept a pending offer made for your sub.")    
+    @commands.has_any_role("Gentleman")
     async def offer_accept(self, ctx: discord.ApplicationContext, offer_id: int):
         await ctx.defer(ephemeral=True)
         if ctx.guild is None:
@@ -484,7 +490,8 @@ class AuctionMarketplaceCog(commands.Cog):
         await ctx.followup.send(f"Offer #{offer_id} accepted. <@{sender_id}> now owns sub {sub_id}.")
         logger.info(f"Offer {offer_id} accepted by {ctx.author.id}. Sub {sub_id} transferred to {sender_id}.")
 
-    @offer_group.command(name="deny", description="Deny a pending offer made for your sub.")
+    @offer_group.command(name="deny", description="Deny a pending offer made for your sub.")    
+    @commands.has_any_role("Gentleman", "Harlot", "Boss")
     async def offer_deny(self, ctx: discord.ApplicationContext, offer_id: int):
         await ctx.defer(ephemeral=True)
         if ctx.guild is None:

@@ -138,7 +138,6 @@ class Database:
                 description TEXT
             );
             """,
-
             # Auctions & Marketplace
             """
             CREATE TABLE IF NOT EXISTS auctions (
@@ -233,7 +232,6 @@ class Database:
                 justification TEXT
             );
             """,
-
             # Server Management & Config
             """
             CREATE TABLE IF NOT EXISTS server_config (
@@ -242,15 +240,64 @@ class Database:
             );
             """,
             """
-            CREATE TABLE IF NOT EXISTS staff_roles (
-                role_id BIGINT PRIMARY KEY
-            );
-            """,
-            """
             CREATE TABLE IF NOT EXISTS backup_recipients (
                 user_id BIGINT PRIMARY KEY
             );
+            """,
             """
+            CREATE TABLE IF NOT EXISTS moderation_logs (
+              id SERIAL PRIMARY KEY,
+              moderator_id BIGINT,
+              user_id BIGINT,
+              action TEXT,          -- e.g. 'ban', 'kick', 'mute', etc.
+              reason TEXT,
+              timestamp TIMESTAMP DEFAULT NOW()
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS warnings (
+              id SERIAL PRIMARY KEY,
+              user_id BIGINT,
+              moderator_id BIGINT,
+              reason TEXT,
+              timestamp TIMESTAMP DEFAULT NOW()
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS tickets (
+              id SERIAL PRIMARY KEY,
+              user_id BIGINT,              -- user who opened ticket
+              channel_id BIGINT,           -- Discord channel ID for the ticket
+              status TEXT DEFAULT 'open',  -- e.g. open, closed
+              created_at TIMESTAMP DEFAULT NOW(),
+              closed_at TIMESTAMP
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS ticket_participants (
+              ticket_id INT REFERENCES tickets(id) ON DELETE CASCADE,
+              user_id BIGINT,
+              added_by BIGINT,            -- who added this user (optional)
+              joined_at TIMESTAMP DEFAULT NOW(),
+              PRIMARY KEY (ticket_id, user_id)
+            );
+
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS user_roles (
+                user_id      BIGINT PRIMARY KEY,
+                age_range    TEXT,
+                relationship TEXT,
+                location     TEXT,
+                orientation  TEXT,
+                dm_status    TEXT,
+                here_for     TEXT[],
+                ping_roles   TEXT[],
+                kinks        TEXT[],
+                created_at   TIMESTAMP DEFAULT NOW(),
+                updated_at   TIMESTAMP DEFAULT NOW()
+            );
+            """,
         ]
 
         if not self.pool:

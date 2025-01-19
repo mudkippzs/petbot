@@ -44,6 +44,7 @@ class ContractEscrowCog(commands.Cog):
 
     # ---------------------------- USER COMMANDS ----------------------------
     @contract_user_group.command(name="advert", description="Post a service advert that potential buyers can respond to.")
+    @commands.has_any_role("Gentleman", "Harlot")
     async def advert_cmd(self, ctx: discord.ApplicationContext):
         """
         Creates an embed in the #the-trading channel (or current channel) with an 'AdvertView.'
@@ -244,7 +245,6 @@ class ContractEscrowCog(commands.Cog):
             ephemeral=True
         )
 
-    # ---------------------------- CONTRACT VIEW CALLBACKS ----------------------------
     async def on_fulfill_complete(self, interaction: discord.Interaction):
         """
         Both parties pressed 'Fulfill,' so we release escrow to the seller.
@@ -333,9 +333,8 @@ class ContractEscrowCog(commands.Cog):
             "Dispute raised. Staff has been notified. Contract is on hold.", ephemeral=True
         )
 
-    # ---------------------------- STAFF COMMANDS ----------------------------
     @contract_staff_group.command(name="resolve_dispute", description="Resolve a disputed contract by forcibly awarding or refunding.")
-    @commands.has_role("Admin")
+    @commands.has_any_role("Boss", "Underboss", "Consigliere")
     async def staff_resolve_dispute(self, ctx: discord.ApplicationContext, contract_id: int, resolution: str):
         """
         Admin-only command to forcibly resolve a disputed contract.
@@ -381,7 +380,6 @@ class ContractEscrowCog(commands.Cog):
         else:
             await ctx.followup.send("Invalid resolution or 'split' feature not enabled.", ephemeral=True)
 
-    # ---------------------------- HELPER METHODS ----------------------------
     async def get_user_balance(self, user_id: int) -> int:
         """
         Example method for retrieving a user's wallet balance from your DB.

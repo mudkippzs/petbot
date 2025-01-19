@@ -65,12 +65,6 @@ class Help(commands.Cog):
             await ctx.followup.send("This command can only be used in a server.")
             return
 
-        # Determine if the user is staff
-        member = ctx.author if isinstance(ctx.author, discord.Member) else ctx.guild.get_member(ctx.author.id)
-        user_is_staff = False
-        if member is not None:
-            user_is_staff = await self.is_staff(member)
-
         strings = self.bot.strings
         theme = self.bot.theme
 
