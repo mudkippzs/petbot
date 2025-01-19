@@ -30,7 +30,7 @@ class MoguMoguBot(commands.Bot):
     async def on_ready(self):
         """Event called when the bot connects to Discord."""
         logger.info(f"Logged in as {self.user} (ID: {self.user.id})")
-        await self.sync_commands(guild_ids=[1317896016707453099,])
+        #await self.sync_commands(guild_ids=[1317896016707453099,])
 
     async def on_error(self, event_method: str, *args, **kwargs):
         """Global error event handler."""
