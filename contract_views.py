@@ -30,14 +30,15 @@ class ConfirmDeleteModal(Modal):
         super().__init__(title="Delete Advert Confirmation")
         self.on_confirm = on_confirm
 
-    async def on_submit(self, interaction: discord.Interaction) -> None:
+    async def callback(self, interaction: discord.Interaction) -> None:
         # Check user typed DELETE
         if self.confirmation.value.strip().upper() == "DELETE":
             await self.on_confirm(interaction)
         else:
             await interaction.response.send_message(
                 "Advert not deleted (did not type DELETE).", 
-                ephemeral=True
+                ephemeral=True,
+                delete_after=30.0
             )
 
 

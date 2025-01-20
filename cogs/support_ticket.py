@@ -81,7 +81,7 @@ class SupportTicketCog(commands.Cog):
         """
         await ctx.defer(ephemeral=True)
         if not ctx.guild:
-            await ctx.followup.send("This command can only be used in a server.", ephemeral=True)
+            await ctx.followup.send("This command can only be used in a server.", ephemeral=True, delete_after=30.0)
             return
 
         user = ctx.author
@@ -113,10 +113,10 @@ class SupportTicketCog(commands.Cog):
                 reason=f"Support ticket opened by {user} ({user.id})."
             )
         except discord.Forbidden:
-            await ctx.followup.send("I lack permission to create a ticket channel.", ephemeral=True)
+            await ctx.followup.send("I lack permission to create a ticket channel.", ephemeral=True, delete_after=30.0)
             return
         except discord.HTTPException as e:
-            await ctx.followup.send(f"Failed to create ticket channel: {e}", ephemeral=True)
+            await ctx.followup.send(f"Failed to create ticket channel: {e}", ephemeral=True, delete_after=30.0)
             return
 
         # Insert into tickets table
@@ -132,7 +132,7 @@ class SupportTicketCog(commands.Cog):
             ticket_id = row["id"]
         except Exception as e:
             await ticket_channel.delete(reason="Failed to record ticket in DB.")
-            await ctx.followup.send("Database error creating ticket. Aborting.", ephemeral=True)
+            await ctx.followup.send("Database error creating ticket. Aborting.", ephemeral=True, delete_after=30.0)
             logger.exception(f"Failed to insert ticket row: {e}")
             return
 
@@ -156,7 +156,7 @@ class SupportTicketCog(commands.Cog):
             "Staff will be with you shortly!"
         )
 
-        await ctx.followup.send(f"Your support ticket is created: {ticket_channel.mention}", ephemeral=True)
+        await ctx.followup.send(f"Your support ticket is created: {ticket_channel.mention}", ephemeral=True, delete_after=30.0)
 
     # -----------
     # COMMAND: CLOSE TICKET
@@ -176,7 +176,7 @@ class SupportTicketCog(commands.Cog):
         """
         await ctx.defer(ephemeral=True)
         if not ctx.guild:
-            await ctx.followup.send("This command can only be used in a server.", ephemeral=True)
+            await ctx.followup.send("This command can only be used in a server.", ephemeral=True, delete_after=30.0)
             return
 
         user = ctx.author
@@ -185,11 +185,11 @@ class SupportTicketCog(commands.Cog):
         # Fetch ticket info
         ticket = await self.bot.db.fetchrow("SELECT * FROM tickets WHERE id=$1;", ticket_id)
         if not ticket:
-            await ctx.followup.send("Ticket not found.", ephemeral=True)
+            await ctx.followup.send("Ticket not found.", ephemeral=True, delete_after=30.0)
             return
 
         if ticket["status"] == "closed":
-            await ctx.followup.send("That ticket is already closed.", ephemeral=True)
+            await ctx.followup.send("That ticket is already closed.", ephemeral=True, delete_after=30.0)
             return
 
         # Check if user is staff or the ticket owner
@@ -201,7 +201,7 @@ class SupportTicketCog(commands.Cog):
         # The user may be staff OR the original ticket opener
         is_ticket_owner = (ticket["user_id"] == user.id)
         if not (user_is_staff or is_ticket_owner):
-            await ctx.followup.send("Only staff or the ticket opener can close this ticket.", ephemeral=True)
+            await ctx.followup.send("Only staff or the ticket opener can close this ticket.", ephemeral=True, delete_after=30.0)
             return
 
         # Set status='closed', closed_at=NOW()
@@ -212,7 +212,7 @@ class SupportTicketCog(commands.Cog):
             )
         except Exception as e:
             logger.exception(f"Failed to close ticket {ticket_id}: {e}")
-            await ctx.followup.send("Database error closing ticket. Try again later.", ephemeral=True)
+            await ctx.followup.send("Database error closing ticket. Try again later.", ephemeral=True, delete_after=30.0)
             return
 
         # Delete channel
@@ -222,13 +222,13 @@ class SupportTicketCog(commands.Cog):
             try:
                 await channel.delete(reason=f"Ticket #{ticket_id} closed by {user.id}")
             except discord.Forbidden:
-                await ctx.followup.send("I do not have permission to delete the ticket channel.", ephemeral=True)
+                await ctx.followup.send("I do not have permission to delete the ticket channel.", ephemeral=True, delete_after=30.0)
                 return
             except discord.HTTPException as e:
-                await ctx.followup.send(f"Failed to delete the ticket channel: {e}", ephemeral=True)
+                await ctx.followup.send(f"Failed to delete the ticket channel: {e}", ephemeral=True, delete_after=30.0)
                 return
 
-        await ctx.followup.send(f"Ticket #{ticket_id} is now closed.", ephemeral=True)
+        await ctx.followup.send(f"Ticket #{ticket_id} is now closed.", ephemeral=True, delete_after=30.0)
 
     # -----------
     # COMMAND: ADD USER
@@ -247,7 +247,7 @@ class SupportTicketCog(commands.Cog):
         """
         await ctx.defer(ephemeral=True)
         if not ctx.guild:
-            await ctx.followup.send("This command can only be used in a server.", ephemeral=True)
+            await ctx.followup.send("This command can only be used in a server.", ephemeral=True, delete_after=30.0)
             return
 
         actor = ctx.author
@@ -255,10 +255,10 @@ class SupportTicketCog(commands.Cog):
 
         ticket = await self.bot.db.fetchrow("SELECT * FROM tickets WHERE id=$1;", ticket_id)
         if not ticket:
-            await ctx.followup.send("Ticket not found.", ephemeral=True)
+            await ctx.followup.send("Ticket not found.", ephemeral=True, delete_after=30.0)
             return
         if ticket["status"] == "closed":
-            await ctx.followup.send("Cannot add users to a closed ticket.", ephemeral=True)
+            await ctx.followup.send("Cannot add users to a closed ticket.", ephemeral=True, delete_after=30.0)
             return
 
         # Check if actor is staff or ticket owner
@@ -269,7 +269,7 @@ class SupportTicketCog(commands.Cog):
         is_ticket_owner = (ticket["user_id"] == actor.id)
 
         if not (actor_is_staff or is_ticket_owner):
-            await ctx.followup.send("Only staff or the ticket owner can add participants.", ephemeral=True)
+            await ctx.followup.send("Only staff or the ticket owner can add participants.", ephemeral=True, delete_after=30.0)
             return
 
         # Insert user into ticket_participants
@@ -284,7 +284,7 @@ class SupportTicketCog(commands.Cog):
             )
         except Exception as e:
             logger.exception(f"Failed to add participant: {e}")
-            await ctx.followup.send("Database error adding user to ticket.", ephemeral=True)
+            await ctx.followup.send("Database error adding user to ticket.", ephemeral=True, delete_after=30.0)
             return
 
         # Update channel permission
@@ -298,10 +298,10 @@ class SupportTicketCog(commands.Cog):
                     send_messages=True
                 )
             except discord.Forbidden:
-                await ctx.followup.send("I lack permission to set channel overwrites.", ephemeral=True)
+                await ctx.followup.send("I lack permission to set channel overwrites.", ephemeral=True, delete_after=30.0)
                 return
             except discord.HTTPException as e:
-                await ctx.followup.send(f"Failed to update channel permissions: {e}", ephemeral=True)
+                await ctx.followup.send(f"Failed to update channel permissions: {e}", ephemeral=True, delete_after=30.0)
                 return
 
         await ctx.followup.send(
@@ -326,7 +326,7 @@ class SupportTicketCog(commands.Cog):
         """
         await ctx.defer(ephemeral=True)
         if not ctx.guild:
-            await ctx.followup.send("This command can only be used in a server.", ephemeral=True)
+            await ctx.followup.send("This command can only be used in a server.", ephemeral=True, delete_after=30.0)
             return
 
         actor = ctx.author
@@ -334,10 +334,10 @@ class SupportTicketCog(commands.Cog):
 
         ticket = await self.bot.db.fetchrow("SELECT * FROM tickets WHERE id=$1;", ticket_id)
         if not ticket:
-            await ctx.followup.send("Ticket not found.", ephemeral=True)
+            await ctx.followup.send("Ticket not found.", ephemeral=True, delete_after=30.0)
             return
         if ticket["status"] == "closed":
-            await ctx.followup.send("Cannot remove users from a closed ticket.", ephemeral=True)
+            await ctx.followup.send("Cannot remove users from a closed ticket.", ephemeral=True, delete_after=30.0)
             return
 
         # Check if actor is staff or ticket owner
@@ -348,7 +348,7 @@ class SupportTicketCog(commands.Cog):
         is_ticket_owner = (ticket["user_id"] == actor.id)
 
         if not (actor_is_staff or is_ticket_owner):
-            await ctx.followup.send("Only staff or the ticket owner can remove participants.", ephemeral=True)
+            await ctx.followup.send("Only staff or the ticket owner can remove participants.", ephemeral=True, delete_after=30.0)
             return
 
         # Remove from ticket_participants
@@ -363,7 +363,7 @@ class SupportTicketCog(commands.Cog):
             # result might be "DELETE 1" if it removed something
         except Exception as e:
             logger.exception(f"Failed to remove participant: {e}")
-            await ctx.followup.send("Database error removing user from ticket.", ephemeral=True)
+            await ctx.followup.send("Database error removing user from ticket.", ephemeral=True, delete_after=30.0)
             return
 
         # Remove channel permission
@@ -373,10 +373,10 @@ class SupportTicketCog(commands.Cog):
             try:
                 await channel.set_permissions(user, overwrite=None)  # remove specific overwrites
             except discord.Forbidden:
-                await ctx.followup.send("I lack permission to unset channel overwrites.", ephemeral=True)
+                await ctx.followup.send("I lack permission to unset channel overwrites.", ephemeral=True, delete_after=30.0)
                 return
             except discord.HTTPException as e:
-                await ctx.followup.send(f"Failed to update channel permissions: {e}", ephemeral=True)
+                await ctx.followup.send(f"Failed to update channel permissions: {e}", ephemeral=True, delete_after=30.0)
                 return
 
         await ctx.followup.send(
@@ -399,12 +399,12 @@ class SupportTicketCog(commands.Cog):
         """
         await ctx.defer(ephemeral=True)
         if not ctx.guild:
-            await ctx.followup.send("This command can only be used in a server.", ephemeral=True)
+            await ctx.followup.send("This command can only be used in a server.", ephemeral=True, delete_after=30.0)
             return
 
         ticket = await self.bot.db.fetchrow("SELECT * FROM tickets WHERE id=$1;", ticket_id)
         if not ticket:
-            await ctx.followup.send("Ticket not found.", ephemeral=True)
+            await ctx.followup.send("Ticket not found.", ephemeral=True, delete_after=30.0)
             return
 
         # Gather participants
@@ -430,7 +430,7 @@ class SupportTicketCog(commands.Cog):
         if p_list:
             embed.add_field(name="Participants", value=", ".join(p_list), inline=False)
 
-        await ctx.followup.send(embed=embed, ephemeral=True)
+        await ctx.followup.send(embed=embed, ephemeral=True, delete_after=30.0)
 
 
 def setup(bot: "MoguMoguBot"):

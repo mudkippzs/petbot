@@ -229,12 +229,12 @@ class BackupCog(commands.Cog):
         """
         # Check guild & staff
         if ctx.guild is None:
-            await ctx.respond("This command can only be used in a server.", ephemeral=True)
+            await ctx.respond("This command can only be used in a server.", ephemeral=True, delete_after=10.0)
             return        
 
         await ctx.defer(ephemeral=True)
         await self.do_backup()
-        await ctx.followup.send("Manual backup completed and sent to configured recipients.", ephemeral=True)
+        await ctx.followup.send("Manual backup completed and sent to configured recipients.", ephemeral=True, delete_after=30.0)
 
     @backup_group.command(name="restore", description="Restore the database from a given SQL dump URL (staff-only).")
     @commands.has_any_role("Boss")
@@ -252,35 +252,37 @@ class BackupCog(commands.Cog):
         """
         # Check guild & staff
         if ctx.guild is None:
-            await ctx.respond("This command can only be used in a server.", ephemeral=True)
+            await ctx.respond("This command can only be used in a server.", ephemeral=True, delete_after=10.0)
             return
         
         await ctx.defer(ephemeral=True)
         # 1) Create a fallback backup
-        await ctx.followup.send("Creating a backup of the **current** database before restoring...", ephemeral=True)
+        await ctx.followup.send("Creating a backup of the **current** database before restoring...", ephemeral=True, delete_after=30.0)
         await self.do_backup()
 
         # 2) Fetch the new SQL data
         await ctx.followup.send(f"Fetching SQL dump from: {url}", ephemeral=True)
         sql_data = await self.fetch_file_from_url(url)
         if sql_data is None:
-            await ctx.followup.send("Failed to fetch the SQL file. Aborting restore.", ephemeral=True)
+            await ctx.followup.send("Failed to fetch the SQL file. Aborting restore.", ephemeral=True, delete_after=10.0)
             return
 
         # 3) Restore
-        await ctx.followup.send("Restoring database from the provided SQL dump...", ephemeral=True)
+        await ctx.followup.send("Restoring database from the provided SQL dump...", ephemeral=True, delete_after=30.0)
         success = await self.restore_database_from_sql(sql_data)
         if not success:
             await ctx.followup.send(
                 "Database restore **failed**. Attempted to reconnect to the old DB. Check logs for details.",
-                ephemeral=True
+                ephemeral=True,
+                delete_after=10.0
             )
             return
 
         # 4) Done
         await ctx.followup.send(
             "Database restore **completed** successfully! The bot has reconnected to the new database.",
-            ephemeral=True
+            ephemeral=True,
+            delete_after=10.0
         )
 
     # ------------------ UTILS ------------------

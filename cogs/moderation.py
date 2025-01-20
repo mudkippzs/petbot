@@ -64,25 +64,25 @@ class ModerationCog(commands.Cog):
     ):
         await ctx.defer(ephemeral=True)
         if not ctx.guild:
-            await ctx.followup.send("This command can only be used within a server.", ephemeral=True)
+            await ctx.followup.send("This command can only be used within a server.", ephemeral=True, delete_after=30.0)
             return
 
         # Check if user is bannable
         if member == ctx.author:
-            await ctx.followup.send("You cannot ban yourself.", ephemeral=True)
+            await ctx.followup.send("You cannot ban yourself.", ephemeral=True, delete_after=30.0)
             return
         if member.top_role >= ctx.author.top_role:
-            await ctx.followup.send("You cannot ban someone with an equal or higher role.", ephemeral=True)
+            await ctx.followup.send("You cannot ban someone with an equal or higher role.", ephemeral=True, delete_after=30.0)
             return
 
         try:
             await member.ban(reason=reason)
             await self.log_action(ctx.author.id, member.id, "ban", reason)
-            await ctx.followup.send(f"{member.mention} has been banned. Reason: {reason}", ephemeral=True)
+            await ctx.followup.send(f"{member.mention} has been banned. Reason: {reason}", ephemeral=True, delete_after=30.0)
         except discord.Forbidden:
-            await ctx.followup.send("I do not have permission to ban this user.", ephemeral=True)
+            await ctx.followup.send("I do not have permission to ban this user.", ephemeral=True, delete_after=30.0)
         except discord.HTTPException as e:
-            await ctx.followup.send(f"Ban failed: {e}", ephemeral=True)
+            await ctx.followup.send(f"Ban failed: {e}", ephemeral=True, delete_after=30.0)
 
     @moderation_group.command(name="kick", description="Kick a user from the server.")
     @commands.has_any_role("Boss", "Underboss", "Consigliere")
@@ -94,24 +94,24 @@ class ModerationCog(commands.Cog):
     ):
         await ctx.defer(ephemeral=True)
         if not ctx.guild:
-            await ctx.followup.send("This command can only be used within a server.", ephemeral=True)
+            await ctx.followup.send("This command can only be used within a server.", ephemeral=True, delete_after=30.0)
             return
 
         if member == ctx.author:
-            await ctx.followup.send("You cannot kick yourself.", ephemeral=True)
+            await ctx.followup.send("You cannot kick yourself.", ephemeral=True, delete_after=30.0)
             return
         if member.top_role >= ctx.author.top_role:
-            await ctx.followup.send("You cannot kick someone with an equal or higher role.", ephemeral=True)
+            await ctx.followup.send("You cannot kick someone with an equal or higher role.", ephemeral=True, delete_after=30.0)
             return
 
         try:
             await member.kick(reason=reason)
             await self.log_action(ctx.author.id, member.id, "kick", reason)
-            await ctx.followup.send(f"{member.mention} has been kicked. Reason: {reason}", ephemeral=True)
+            await ctx.followup.send(f"{member.mention} has been kicked. Reason: {reason}", ephemeral=True, delete_after=30.0)
         except discord.Forbidden:
-            await ctx.followup.send("I do not have permission to kick this user.", ephemeral=True)
+            await ctx.followup.send("I do not have permission to kick this user.", ephemeral=True, delete_after=30.0)
         except discord.HTTPException as e:
-            await ctx.followup.send(f"Kick failed: {e}", ephemeral=True)
+            await ctx.followup.send(f"Kick failed: {e}", ephemeral=True, delete_after=30.0)
 
     @moderation_group.command(name="mute", description="Give the user the muted role to prevent them from sending messages.")
     @commands.has_any_role("Boss", "Underboss", "Consigliere")
@@ -123,32 +123,32 @@ class ModerationCog(commands.Cog):
     ):
         await ctx.defer(ephemeral=True)
         if not ctx.guild:
-            await ctx.followup.send("This command can only be used within a server.", ephemeral=True)
+            await ctx.followup.send("This command can only be used within a server.", ephemeral=True, delete_after=30.0)
             return
 
         # Suppose you have a "Muted" role in your config
         muted_role_id = self.bot.config.get("muted_role_id")
         if not muted_role_id:
-            await ctx.followup.send("No muted_role_id found in config. Can't proceed.", ephemeral=True)
+            await ctx.followup.send("No muted_role_id found in config. Can't proceed.", ephemeral=True, delete_after=30.0)
             return
 
         muted_role = ctx.guild.get_role(muted_role_id)
         if not muted_role:
-            await ctx.followup.send("Muted role not found in this server.", ephemeral=True)
+            await ctx.followup.send("Muted role not found in this server.", ephemeral=True, delete_after=30.0)
             return
 
         if muted_role in member.roles:
-            await ctx.followup.send(f"{member.mention} is already muted.", ephemeral=True)
+            await ctx.followup.send(f"{member.mention} is already muted.", ephemeral=True, delete_after=30.0)
             return
 
         try:
             await member.add_roles(muted_role, reason=reason)
             await self.log_action(ctx.author.id, member.id, "mute", reason)
-            await ctx.followup.send(f"{member.mention} has been muted. Reason: {reason}", ephemeral=True)
+            await ctx.followup.send(f"{member.mention} has been muted. Reason: {reason}", ephemeral=True, delete_after=30.0)
         except discord.Forbidden:
-            await ctx.followup.send("I do not have permission to manage roles for that user.", ephemeral=True)
+            await ctx.followup.send("I do not have permission to manage roles for that user.", ephemeral=True, delete_after=30.0)
         except discord.HTTPException as e:
-            await ctx.followup.send(f"Mute failed: {e}", ephemeral=True)
+            await ctx.followup.send(f"Mute failed: {e}", ephemeral=True, delete_after=30.0)
 
     @moderation_group.command(name="unmute", description="Remove the muted role from a user.")
     @commands.has_any_role("Boss", "Underboss", "Consigliere")
@@ -159,27 +159,27 @@ class ModerationCog(commands.Cog):
     ):
         await ctx.defer(ephemeral=True)
         if not ctx.guild:
-            await ctx.followup.send("This command can only be used within a server.", ephemeral=True)
+            await ctx.followup.send("This command can only be used within a server.", ephemeral=True, delete_after=30.0)
             return
 
         muted_role_id = self.bot.config.get("muted_role_id")
         if not muted_role_id:
-            await ctx.followup.send("No muted_role_id found in config. Can't proceed.", ephemeral=True)
+            await ctx.followup.send("No muted_role_id found in config. Can't proceed.", ephemeral=True, delete_after=30.0)
             return
 
         muted_role = ctx.guild.get_role(muted_role_id)
         if not muted_role or muted_role not in member.roles:
-            await ctx.followup.send(f"{member.mention} is not muted.", ephemeral=True)
+            await ctx.followup.send(f"{member.mention} is not muted.", ephemeral=True, delete_after=30.0)
             return
 
         try:
             await member.remove_roles(muted_role, reason="Unmute")
             await self.log_action(ctx.author.id, member.id, "unmute", "Unmute")
-            await ctx.followup.send(f"{member.mention} has been unmuted.", ephemeral=True)
+            await ctx.followup.send(f"{member.mention} has been unmuted.", ephemeral=True, delete_after=30.0)
         except discord.Forbidden:
-            await ctx.followup.send("I do not have permission to manage roles for that user.", ephemeral=True)
+            await ctx.followup.send("I do not have permission to manage roles for that user.", ephemeral=True, delete_after=30.0)
         except discord.HTTPException as e:
-            await ctx.followup.send(f"Unmute failed: {e}", ephemeral=True)
+            await ctx.followup.send(f"Unmute failed: {e}", ephemeral=True, delete_after=30.0)
 
     @moderation_group.command(name="deafen", description="Server-deafen a user in voice.")
     @commands.has_any_role("Boss", "Underboss", "Consigliere")
@@ -191,21 +191,21 @@ class ModerationCog(commands.Cog):
     ):
         await ctx.defer(ephemeral=True)
         if not ctx.guild:
-            await ctx.followup.send("This command can only be used within a server.", ephemeral=True)
+            await ctx.followup.send("This command can only be used within a server.", ephemeral=True, delete_after=30.0)
             return
 
         if not member.voice or not member.voice.channel:
-            await ctx.followup.send(f"{member.mention} is not in a voice channel.", ephemeral=True)
+            await ctx.followup.send(f"{member.mention} is not in a voice channel.", ephemeral=True, delete_after=30.0)
             return
 
         try:
             await member.edit(deafen=True, reason=reason)
             await self.log_action(ctx.author.id, member.id, "deafen", reason)
-            await ctx.followup.send(f"{member.mention} has been deafened. Reason: {reason}", ephemeral=True)
+            await ctx.followup.send(f"{member.mention} has been deafened. Reason: {reason}", ephemeral=True, delete_after=30.0)
         except discord.Forbidden:
-            await ctx.followup.send("I do not have permission to deafen this user.", ephemeral=True)
+            await ctx.followup.send("I do not have permission to deafen this user.", ephemeral=True, delete_after=30.0)
         except discord.HTTPException as e:
-            await ctx.followup.send(f"Deafen failed: {e}", ephemeral=True)
+            await ctx.followup.send(f"Deafen failed: {e}", ephemeral=True, delete_after=30.0)
 
     @moderation_group.command(name="disconnect", description="Disconnect a user from voice.")
     @commands.has_any_role("Boss", "Underboss", "Consigliere")
@@ -217,21 +217,21 @@ class ModerationCog(commands.Cog):
     ):
         await ctx.defer(ephemeral=True)
         if not ctx.guild:
-            await ctx.followup.send("This command can only be used within a server.", ephemeral=True)
+            await ctx.followup.send("This command can only be used within a server.", ephemeral=True, delete_after=30.0)
             return
 
         if not member.voice or not member.voice.channel:
-            await ctx.followup.send(f"{member.mention} is not in a voice channel.", ephemeral=True)
+            await ctx.followup.send(f"{member.mention} is not in a voice channel.", ephemeral=True, delete_after=30.0)
             return
 
         try:
             await member.edit(voice_channel=None, reason=reason)
             await self.log_action(ctx.author.id, member.id, "disconnect", reason)
-            await ctx.followup.send(f"{member.mention} has been disconnected from voice. Reason: {reason}", ephemeral=True)
+            await ctx.followup.send(f"{member.mention} has been disconnected from voice. Reason: {reason}", ephemeral=True, delete_after=30.0)
         except discord.Forbidden:
-            await ctx.followup.send("I do not have permission to disconnect this user.", ephemeral=True)
+            await ctx.followup.send("I do not have permission to disconnect this user.", ephemeral=True, delete_after=30.0)
         except discord.HTTPException as e:
-            await ctx.followup.send(f"Disconnect failed: {e}", ephemeral=True)
+            await ctx.followup.send(f"Disconnect failed: {e}", ephemeral=True, delete_after=30.0)
 
     @moderation_group.command(name="timeout", description="Timeout a user for a given number of minutes.")
     @commands.has_any_role("Boss", "Underboss", "Consigliere")
@@ -247,11 +247,11 @@ class ModerationCog(commands.Cog):
         """
         await ctx.defer(ephemeral=True)
         if not ctx.guild:
-            await ctx.followup.send("This command can only be used within a server.", ephemeral=True)
+            await ctx.followup.send("This command can only be used within a server.", ephemeral=True, delete_after=30.0)
             return
 
         if minutes <= 0:
-            await ctx.followup.send("Timeout duration must be greater than 0.", ephemeral=True)
+            await ctx.followup.send("Timeout duration must be greater than 0.", ephemeral=True, delete_after=30.0)
             return
 
         duration = timedelta(minutes=minutes)
@@ -259,11 +259,11 @@ class ModerationCog(commands.Cog):
         try:
             await member.timeout(duration=duration, reason=reason)
             await self.log_action(ctx.author.id, member.id, "timeout", f"{reason} ({minutes}m)")
-            await ctx.followup.send(f"{member.mention} has been timed out for {minutes} minutes. Reason: {reason}", ephemeral=True)
+            await ctx.followup.send(f"{member.mention} has been timed out for {minutes} minutes. Reason: {reason}", ephemeral=True, delete_after=30.0)
         except discord.Forbidden:
-            await ctx.followup.send("I do not have permission to timeout this user.", ephemeral=True)
+            await ctx.followup.send("I do not have permission to timeout this user.", ephemeral=True, delete_after=30.0)
         except discord.HTTPException as e:
-            await ctx.followup.send(f"Timeout failed: {e}", ephemeral=True)
+            await ctx.followup.send(f"Timeout failed: {e}", ephemeral=True, delete_after=30.0)
 
     @moderation_group.command(name="warn", description="Issue a warning to a user and record it.")
     @commands.has_any_role("Boss", "Underboss", "Consigliere")
@@ -279,7 +279,7 @@ class ModerationCog(commands.Cog):
         """
         await ctx.defer(ephemeral=True)
         if not ctx.guild:
-            await ctx.followup.send("This command can only be used within a server.", ephemeral=True)
+            await ctx.followup.send("This command can only be used within a server.", ephemeral=True, delete_after=30.0)
             return
 
         # Insert into 'warnings' table if it exists:
@@ -296,7 +296,7 @@ class ModerationCog(commands.Cog):
         # Also log in moderation_logs
         await self.log_action(ctx.author.id, member.id, "warn", reason)
 
-        await ctx.followup.send(f"{member.mention} has been warned. Reason: {reason}", ephemeral=True)
+        await ctx.followup.send(f"{member.mention} has been warned. Reason: {reason}", ephemeral=True, delete_after=30.0)
 
 
 def setup(bot: "MoguMoguBot"):

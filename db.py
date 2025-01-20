@@ -221,17 +221,6 @@ class Database:
                 balance INT DEFAULT 0
             );
             """,
-            """
-            CREATE TABLE IF NOT EXISTS transactions (
-                id SERIAL PRIMARY KEY,
-                sender_id BIGINT,
-                recipient_id BIGINT,
-                amount INT,
-                timestamp TIMESTAMP DEFAULT NOW(),
-                status TEXT DEFAULT 'completed',
-                justification TEXT
-            );
-            """,
             # Server Management & Config
             """
             CREATE TABLE IF NOT EXISTS server_config (
@@ -287,6 +276,7 @@ class Database:
             CREATE TABLE IF NOT EXISTS user_roles (
                 user_id      BIGINT PRIMARY KEY,
                 age_range    TEXT,
+                gender_role    TEXT,
                 relationship TEXT,
                 location     TEXT,
                 orientation  TEXT,
@@ -298,6 +288,49 @@ class Database:
                 updated_at   TIMESTAMP DEFAULT NOW()
             );
             """,
+            """
+            CREATE TABLE IF NOT EXISTS claims (
+                id SERIAL PRIMARY KEY,
+                owner_id BIGINT NOT NULL,
+                sub_id BIGINT NOT NULL,
+                staff_approvals INT DEFAULT 0,
+                sub_approved BOOLEAN DEFAULT FALSE,
+                status TEXT DEFAULT 'pending',
+                staff_msg_id BIGINT,
+                sub_msg_id BIGINT
+            );
+            """,
+
+            # The many-to-many "staff approvals" for a claim
+            """
+            CREATE TABLE IF NOT EXISTS claims_staff_approvals (
+                claim_id INT REFERENCES claims(id) ON DELETE CASCADE,
+                staff_id BIGINT,
+                PRIMARY KEY (claim_id, staff_id)
+            );
+            """,
+
+            # The "dm_ownership_views" table for storing message IDs in "🔍" DM views
+            """
+            CREATE TABLE IF NOT EXISTS dm_ownership_views (
+                message_id BIGINT PRIMARY KEY,
+                user_id BIGINT,
+                target_user_id BIGINT,
+                active BOOLEAN DEFAULT TRUE
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS transactions (
+                id SERIAL PRIMARY KEY,
+                sender_id BIGINT NOT NULL,
+                recipient_id BIGINT NOT NULL,
+                status TEXT DEFAULT 'pending',
+                amount INT NOT NULL,
+                justification TEXT,
+                hash TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+"""
         ]
 
         if not self.pool:

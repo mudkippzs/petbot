@@ -9,23 +9,20 @@ if TYPE_CHECKING:
     from main import MoguMoguBot
 
 ##############################################################################
-# SELECT OPTIONS (unchanged from your snippet)
+# SELECT OPTIONS
 ##############################################################################
+
+# Page 1: Age, Gender, Location
+GENDER_OPTIONS = [
+    discord.SelectOption(label="Gentleman", value="Gentleman", emoji="🤵"),
+    discord.SelectOption(label="Harlot", value="Harlot", emoji="👰"),
+]
 
 AGE_OPTIONS = [
     discord.SelectOption(label="18-20", value="18-20", emoji="🔞"),
     discord.SelectOption(label="21-29", value="21-29", emoji="🍻"),
     discord.SelectOption(label="30-39", value="30-39", emoji="✨"),
     discord.SelectOption(label="40+", value="40+", emoji="✨"),
-]
-
-RELATIONSHIP_OPTIONS = [
-    discord.SelectOption(label="Single", value="Single", emoji="💕"),
-    discord.SelectOption(label="In a relationship", value="In A Relationship", emoji="💖"),
-    discord.SelectOption(label="Open relationship (Closed)", value="In a poly relationship (Closed)", emoji="🔒"),
-    discord.SelectOption(label="Open relationship (Open)", value="In a poly relationship (Open)", emoji="🔓"),
-    discord.SelectOption(label="It's Complicated", value="It's Complicated", emoji="❓"),
-    discord.SelectOption(label="Owned Off Server", value="Owned Off Server", emoji="👥"),
 ]
 
 LOCATION_OPTIONS = [
@@ -37,6 +34,7 @@ LOCATION_OPTIONS = [
     discord.SelectOption(label="South America", value="South America", emoji="🌎"),
 ]
 
+# Page 2: Orientation, Here For
 ORIENTATION_OPTIONS = [
     discord.SelectOption(label="Straight", value="Straight", emoji="👫"),
     discord.SelectOption(label="Gay/Lesbian", value="Gay/Lesbian", emoji="🌈"),
@@ -45,17 +43,18 @@ ORIENTATION_OPTIONS = [
     discord.SelectOption(label="Asexual", value="Asexual", emoji="🎈"),
 ]
 
-DM_STATUS_OPTIONS = [
-    discord.SelectOption(label="Closed", value="Closed", emoji="🚫"),
-    discord.SelectOption(label="Open", value="Open", emoji="✅"),
-    discord.SelectOption(label="Ask to DM", value="Ask", emoji="❓"),
-    discord.SelectOption(label="Ask Owner to DM", value="ask owner To Dm", emoji="❗"),
-]
-
 HERE_FOR_OPTIONS = [
     discord.SelectOption(label="Friendship", value="Friendship", emoji="👥"),
     discord.SelectOption(label="Online Play", value="Online Play", emoji="🎉"),
     discord.SelectOption(label="IRL Play", value="Irl Play", emoji="🎲"),
+]
+
+# Page 3: DM Status, Ping Roles
+DM_STATUS_OPTIONS = [
+    discord.SelectOption(label="Closed", value="Closed DMs", emoji="🚫"),
+    discord.SelectOption(label="Open", value="Open DMs", emoji="✅"),
+    discord.SelectOption(label="Ask to DM", value="Ask To DM", emoji="❓"),
+    discord.SelectOption(label="Ask Owner to DM", value="Ask Owner to DM", emoji="❗"),
 ]
 
 PING_ROLES_OPTIONS = [
@@ -65,7 +64,7 @@ PING_ROLES_OPTIONS = [
     discord.SelectOption(label="VC", value="VC", emoji="📅"),
 ]
 
-# Kink categories
+# Page 4: Kinks
 KINKS_BONDAGE = [
     discord.SelectOption(label="None of these", value="n0t_a_r0le_bondage", emoji="❌"),
     discord.SelectOption(label="Bondage", value="bondage", emoji="🪢"),
@@ -123,7 +122,6 @@ KINKS_PSYCH = [
     discord.SelectOption(label="Food Control", value="food control", emoji="🍴"),
     discord.SelectOption(label="Financial Control", value="financial control", emoji="💰"),
     discord.SelectOption(label="Orgasm Control", value="orgasm control", emoji="⏳"),
-    discord.SelectOption(label="Tpe", value="tpe", emoji="🤝"),
     discord.SelectOption(label="Role Play", value="role play", emoji="🎭"),
     discord.SelectOption(label="Tears Crying", value="tears/crying", emoji="😭"),
     discord.SelectOption(label="Human Furniture", value="human furniture", emoji="🪑"),
@@ -146,7 +144,6 @@ KINKS_EDGE_EXTREME = [
     discord.SelectOption(label="TPE", value="TPE", emoji="🎮"),
 ]
 
-# If you need disclaimers for advanced kinks:
 ADVANCED_KINK_VALUES = {
     "abduction", "amputation", "blood play", "body modification", "cnc",
     "extreme/edge play", "guns", "knives", "needles", "forced intox", "fire"
@@ -159,8 +156,8 @@ ADVANCED_KINK_VALUES = {
 class MultiUserRoleSelectCog(commands.Cog):
     """
     This cog posts a persistent "Role Setup" message with two buttons:
-     1) Choose Roles (3-page flow)
-     2) Edit/Remove Roles (3-page flow pre-filled with user’s current roles).
+     1) Choose Roles (4-page flow)
+     2) Edit/Remove Roles (4-page flow pre-filled with user’s current roles).
     """
 
     def __init__(self, bot: commands.Bot):
@@ -198,7 +195,7 @@ class MultiUserRoleSelectCog(commands.Cog):
             msg = await channel.fetch_message(msg_id)
             await msg.edit(view=self.role_setup_view)
             self.bot.add_view(self.role_setup_view)
-            logger.info(f"Reattached to existing role setup message {msg_id}.")
+            logger.debug(f"Reattached to existing role setup message {msg_id}.")
         except discord.NotFound:
             logger.warning(f"Message {msg_id} not found.")
         except discord.Forbidden:
@@ -206,7 +203,7 @@ class MultiUserRoleSelectCog(commands.Cog):
         except Exception as e:
             logger.exception(f"Error reattaching: {e}")
 
-    # Create a slash command group for roles
+    # Slash Command Group
     roles = SlashCommandGroup("roles", "Manage role preferences")
 
     @roles.command(name="setup")
@@ -218,10 +215,10 @@ class MultiUserRoleSelectCog(commands.Cog):
         await ctx.defer(ephemeral=True)
 
         embed = discord.Embed(
-            title="Get Your Roles!",
+            title="Choose your Roles!",
             description=(
-                "Click **Choose Roles** to open an **ephemeral** multi-page menu.\n"
-                "Click **Edit/Remove Roles** to pre-fill your existing roles and remove them or add more."
+                "Click **Choose Roles** to open an **ephemeral** menu where you can choose "
+                "or edit your role selection!\n"
             ),
             color=discord.Color.blurple()
         )
@@ -242,18 +239,18 @@ class MultiUserRoleSelectCog(commands.Cog):
             json.dump(config_data, f, indent=4)
 
         self.bot.add_view(self.role_setup_view)
-        await ctx.respond("Role setup message created!", ephemeral=True)
+        await ctx.respond("Role setup message created!", ephemeral=True, delete_after=30.0)
 
 
 ##############################################################################
-# PERSISTENT VIEW: RoleSetupView with two buttons
+# PUBLIC VIEW: RoleSetupView with two buttons
 ##############################################################################
 
 class RoleSetupView(discord.ui.View):
     """
-    Public message's view with 2 buttons:
-     1) Choose Roles (always starts a fresh 3-page flow, defaulting to no roles if user has none)
-     2) Edit/Remove Roles (loads user's existing roles from DB, pre-fills them in the ephemeral view)
+    The public message's view with 2 buttons:
+     1) Choose Roles (fresh 4-page flow)
+     2) Edit/Remove Roles (4-page flow pre-filled from DB).
     """
     def __init__(self, bot: commands.Bot):
         super().__init__(timeout=None)
@@ -262,16 +259,15 @@ class RoleSetupView(discord.ui.View):
     @discord.ui.button(label="Choose Roles", custom_id="roles-choose", style=discord.ButtonStyle.primary)
     async def choose_roles(self, button: discord.ui.Button, interaction: discord.Interaction):
         if not isinstance(interaction.user, discord.Member):
-            return await interaction.response.send_message("Error: Not a guild member.", ephemeral=True)
+            return await interaction.response.send_message("Error: Not a guild member.", ephemeral=True, delete_after=30.0)
 
-        # Fetch existing record if any (to let them keep or override)
-        user_id = interaction.user.id
-        row = await self.bot.db.fetchrow("SELECT * FROM user_roles WHERE user_id=$1", user_id)
+        # Fetch existing record if any
+        row = await self.bot.db.fetchrow("SELECT * FROM user_roles WHERE user_id=$1", interaction.user.id)
         if not row:
-            # None found, build an empty record
+            # none found -> build empty
             row = {
+                "gender_role": None,
                 "age_range": None,
-                "relationship": None,
                 "location": None,
                 "orientation": None,
                 "dm_status": None,
@@ -282,82 +278,100 @@ class RoleSetupView(discord.ui.View):
         else:
             row = dict(row)
 
-        # Show ephemeral 3-page flow
         view = RolesFlowView(bot=self.bot, user=interaction.user, old_record=row)
         await interaction.response.send_message(
-            content="**Select your roles & kinks** (Choose Roles):",
+            content="**Select your roles & kinks** and click Finish on the final page when you're done:",
             view=view,
-            ephemeral=True
+            ephemeral=True, 
+            delete_after=600.0
         )
 
 
 ##############################################################################
-# 3-PAGE EPHEMERAL FLOW: RolesFlowView
+# 4-PAGE FLOW: RolesFlowView
 ##############################################################################
 
 class RolesFlowView(discord.ui.View):
     """
-    A 3-page ephemeral flow for both "Choose Roles" and "Edit/Remove Roles."
-    - old_record: the user's previous state from DB (maybe empty if new).
-    - new_data: the user’s updated selections. 
+    A 4-page ephemeral flow for both "Choose Roles" and "Edit/Remove Roles."
+    On "Finish," the user’s selections are stored in DB and synced as Discord roles.
     """
+
     def __init__(self, bot: commands.Bot, user: discord.Member, old_record: Dict[str, Any]):
         super().__init__(timeout=600)
         self.bot = bot
         self.user = user
-        self.old_record = old_record  # The DB record from "user_roles" table
+        self.old_record = old_record
 
-        # Initialize new_data with the old_record's values
+        # new_data starts from old_record
         self.new_data = {
-            "age": old_record["age_range"],
-            "relationship": old_record["relationship"],
-            "location": old_record["location"],
-            "orientation": old_record["orientation"],
-            "dm_status": old_record["dm_status"],
-            "here_for": list(old_record["here_for"]),
-            "ping_roles": list(old_record["ping_roles"]),
-            "kinks": list(old_record["kinks"]),
+            "gender_role": old_record.get("gender_role"),
+            "age": old_record.get("age_range"),
+            "location": old_record.get("location"),
+            "orientation": old_record.get("orientation"),
+            "dm_status": old_record.get("dm_status"),
+            "here_for": list(old_record.get("here_for", [])),
+            "ping_roles": list(old_record.get("ping_roles", [])),
+            "kinks": list(old_record.get("kinks", [])),
         }
 
         self.page = 1
         self.render_page_1()
 
     # ─────────────────────────────────────────────────────────────────────
-    # Page Navigation
+    # Page navigation
     # ─────────────────────────────────────────────────────────────────────
     def render_page_1(self):
         self.clear_items()
         self.page = 1
+
+        # Page 1: Age, Gender, Location
         self.add_item(AgeSelect(self))
-        self.add_item(RelationshipSelect(self))
+        self.add_item(GenderSelect(self))
         self.add_item(LocationSelect(self))
-        self.add_item(OrientationSelect(self))
         self.add_item(Page1NextButton(self))
 
     def render_page_2(self):
         self.clear_items()
         self.page = 2
-        self.add_item(DMStatusSelect(self))
+
+        # Page 2: Orientation, Here For
+        self.add_item(OrientationSelect(self))
         self.add_item(HereForSelect(self))
-        self.add_item(PingRolesSelect(self))
         self.add_item(Page2BackButton(self))
         self.add_item(Page2NextButton(self))
 
     def render_page_3(self):
         self.clear_items()
         self.page = 3
-        self.add_item(BondageRestraintsSelect(self))
-        self.add_item(BodyPhysicalSelect(self))
-        self.add_item(PsychEmotionalSelect(self))
-        self.add_item(EdgeExtremeSelect(self))
+
+        # Page 3: DM Status, Pingable Roles
+        self.add_item(DMStatusSelect(self))
+        self.add_item(PingRolesSelect(self))
         self.add_item(Page3BackButton(self))
-        self.add_item(FinishButton(self))
+        self.add_item(Page3NextButton(self))
+
+    def render_page_4(self):
+        self.clear_items()
+        self.page = 4
+
+        # Page 4: Kinks + Finish
+        # We need to specify row indices so we don't exceed 5 rows total.
+        self.add_item(BondageRestraintsSelect(self, row=0))
+        self.add_item(BodyPhysicalSelect(self, row=1))
+        self.add_item(PsychEmotionalSelect(self, row=2))
+        self.add_item(EdgeExtremeSelect(self, row=3))
+        # Put both buttons on the same row (row=4)
+        self.add_item(Page4BackButton(self, row=4))
+        self.add_item(FinishButton(self, row=4))
 
     async def next_page(self, interaction: discord.Interaction):
         if self.page == 1:
             self.render_page_2()
         elif self.page == 2:
             self.render_page_3()
+        elif self.page == 3:
+            self.render_page_4()
         await interaction.response.edit_message(view=self)
 
     async def previous_page(self, interaction: discord.Interaction):
@@ -365,10 +379,12 @@ class RolesFlowView(discord.ui.View):
             self.render_page_1()
         elif self.page == 3:
             self.render_page_2()
+        elif self.page == 4:
+            self.render_page_3()
         await interaction.response.edit_message(view=self)
 
     # ─────────────────────────────────────────────────────────────────────
-    # Storing Selections
+    # Storing selections
     # ─────────────────────────────────────────────────────────────────────
     async def store_single_value(self, interaction: discord.Interaction, field_name: str, value: str):
         self.new_data[field_name] = value
@@ -379,8 +395,12 @@ class RolesFlowView(discord.ui.View):
         await interaction.response.defer()
 
     async def store_kinks_from_category(self, interaction: discord.Interaction, cat_values: List[str], chosen: List[str]):
-        # Remove old kinks from this category
+        """
+        For a given category (bondage, physical, etc.), remove old selections from that category,
+        then add the newly chosen ones.
+        """
         old_set = set(self.new_data["kinks"])
+        # Remove old kinks from this category
         old_set = {k for k in old_set if k not in cat_values}
         # Add newly chosen
         new_set = old_set.union(chosen)
@@ -388,50 +408,55 @@ class RolesFlowView(discord.ui.View):
         await interaction.response.defer()
 
     # ─────────────────────────────────────────────────────────────────────
-    # Finish: Double-Pass Remove/Add, DB Upsert
+    # Finish Flow: upsert DB + remove/add Discord roles
     # ─────────────────────────────────────────────────────────────────────
     async def finish_flow(self, interaction: discord.Interaction):
-        logger.debug("[finish_flow] Starting for user=%s (%s)", self.user.id, self.user.display_name)
+        logger.debug("[finish_flow] Starting for user=%s", self.user.id)
         await interaction.response.defer(ephemeral=True)
 
-        # 1) Gather the new data from ephemeral form
         new = self.new_data
         logger.debug(f"[finish_flow] new_data={new}")
 
-        # 2) Check advanced kinks
+        # Check advanced kinks
         advanced_selected = [k for k in new["kinks"] if k.lower() in ADVANCED_KINK_VALUES]
         disclaimers = ""
         if advanced_selected:
             disclaimers = (
-                "**Edge/Advanced Kink Disclaimer**\n"
-                f"You chose: {', '.join(advanced_selected)}.\n"
-                "These are considered high-risk or extreme. By proceeding, you confirm you understand the risks.\n\n"
+                "**Safety Disclaimer**\n"
+                f"You have selected these edge/high-risk kinks: {', '.join(advanced_selected)}.\n"
+                "By proceeding, you confirm you understand the associated risks.\n\n"
             )
 
-        # 3) Upsert the new data into the database
-        logger.debug(f"[finish_flow] Upserting new data into DB for user_id={self.user.id}")
+        # Upsert
         upsert_query = """
             INSERT INTO user_roles (
-                user_id, age_range, relationship, location, orientation, dm_status,
-                here_for, ping_roles, kinks
+                user_id,
+                gender_role,
+                age_range,
+                location,
+                orientation,
+                dm_status,
+                here_for,
+                ping_roles,
+                kinks
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             ON CONFLICT (user_id) DO UPDATE
-              SET age_range    = EXCLUDED.age_range,
-                  relationship = EXCLUDED.relationship,
-                  location     = EXCLUDED.location,
-                  orientation  = EXCLUDED.orientation,
-                  dm_status    = EXCLUDED.dm_status,
-                  here_for     = EXCLUDED.here_for,
-                  ping_roles   = EXCLUDED.ping_roles,
-                  kinks        = EXCLUDED.kinks,
-                  updated_at   = NOW();
+              SET gender_role = EXCLUDED.gender_role,
+                  age_range   = EXCLUDED.age_range,
+                  location    = EXCLUDED.location,
+                  orientation = EXCLUDED.orientation,
+                  dm_status   = EXCLUDED.dm_status,
+                  here_for    = EXCLUDED.here_for,
+                  ping_roles  = EXCLUDED.ping_roles,
+                  kinks       = EXCLUDED.kinks,
+                  updated_at  = NOW();
         """
         await self.bot.db.execute(
             upsert_query,
             self.user.id,
+            new["gender_role"],
             new["age"],
-            new["relationship"],
             new["location"],
             new["orientation"],
             new["dm_status"],
@@ -439,16 +464,14 @@ class RolesFlowView(discord.ui.View):
             new["ping_roles"],
             new["kinks"],
         )
-        logger.debug(f"[finish_flow] DB upsert completed for user_id={self.user.id}")
 
-        # 4) Fetch the updated record to ensure we have the final DB state
+        # Fetch updated record
         fresh = await self.bot.db.fetchrow("SELECT * FROM user_roles WHERE user_id=$1", self.user.id)
         if not fresh:
-            logger.warning(f"[finish_flow] After upsert, no record found in DB for user_id={self.user.id}")
-            # Construct a fallback empty record
+            logger.warning("[finish_flow] No record found after upsert.")
             fresh = {
+                "gender_role": None,
                 "age_range": None,
-                "relationship": None,
                 "location": None,
                 "orientation": None,
                 "dm_status": None,
@@ -459,115 +482,94 @@ class RolesFlowView(discord.ui.View):
         else:
             fresh = dict(fresh)
 
-        logger.debug(f"[finish_flow] fresh_record={fresh}")
-
-        # 5) Align Discord roles to match the final DB record
-        #    We'll compare the *old* DB record vs. the *fresh* record, so we remove old roles not in fresh, add new ones.
-        old = self.old_record  # The record prior to this flow
+        # Remove old roles, add new roles
+        old = self.old_record
         member = self.user
 
-        # ----- SINGLE-VALUE FIELDS -----
+        # Single-value fields
         single_map = {
+            "gender_role": "gender",
             "age_range":   "age",
-            "relationship":"relationship",
             "location":    "location",
             "orientation": "orientation",
             "dm_status":   "dm_status",
         }
 
-        for db_column, field_name in single_map.items():
+        for db_column, field_label in single_map.items():
             old_val = old.get(db_column)
             new_val = fresh.get(db_column)
 
-            logger.debug(f"[finish_flow] Single-value field={db_column}, old_val={old_val}, new_val={new_val}")
-
-            # Remove old role if it changed
             if old_val and old_val != new_val:
                 old_role = discord.utils.get(member.guild.roles, name=old_val)
-                logger.debug(f"  Found old_role={old_role} for name={old_val}")
                 if old_role and old_role in member.roles:
                     try:
-                        await member.remove_roles(old_role, reason=f"Removing old {field_name}")
-                        logger.debug(f"  Removed old role: {old_val}")
+                        await member.remove_roles(old_role, reason=f"Removing old {field_label}")
                     except Exception as e:
-                        logger.warning(f"  Failed to remove old {field_name} role {old_role}; {e}")
+                        logger.warning(f"Failed to remove role {old_val}: {e}")
 
-            # Add new role if it changed
             if new_val and new_val != old_val:
                 new_role = discord.utils.get(member.guild.roles, name=new_val)
-                logger.debug(f"  Found new_role={new_role} for name={new_val}")
                 if new_role:
                     try:
-                        await member.add_roles(new_role, reason=f"Adding new {field_name}")
-                        logger.debug(f"  Added new role: {new_val}")
+                        await member.add_roles(new_role, reason=f"Adding new {field_label}")
                     except Exception as e:
-                        logger.warning(f"  Failed to add new {field_name}, val: {new_val}; {e}")
+                        logger.warning(f"Failed to add role {new_val}: {e}")
 
-        # ----- MULTI-VALUE FIELDS -----
+        # Multi-value fields
         multi_fields = ["here_for", "ping_roles", "kinks"]
         for field in multi_fields:
             old_vals = set(old.get(field, []))
             new_vals = set(fresh.get(field, []))
-            logger.debug(f"[finish_flow] Multi-value field={field}, old={old_vals}, new={new_vals}")
-
             to_remove = old_vals - new_vals
             to_add = new_vals - old_vals
 
             for val in to_remove:
                 role = discord.utils.get(member.guild.roles, name=val)
-                logger.debug(f"  Removing role name={val} -> found={role}")
                 if role and role in member.roles:
                     try:
                         await member.remove_roles(role, reason=f"Remove {field}")
-                        logger.debug(f"  Removed role: {val}")
                     except Exception as e:
-                        logger.warning(f"  Failed removing {field} role {val}: {e}")
+                        logger.warning(f"Failed removing {field} role {val}: {e}")
 
             for val in to_add:
                 role = discord.utils.get(member.guild.roles, name=val)
-                logger.debug(f"  Adding role name={val} -> found={role}")
                 if role:
                     try:
                         await member.add_roles(role, reason=f"Add {field}")
-                        logger.debug(f"  Added role: {val}")
                     except Exception as e:
-                        logger.warning(f"  Failed adding {field} role {val}: {e}")
+                        logger.warning(f"Failed adding {field} role {val}: {e}")
 
-        # Remove 'no role' placeholders.
-        if "n0t_a_r0le_bondage" in fresh['kinks']:
-            fresh['kinks'].remove("n0t_a_r0le_bondage")
-        if "n0t_a_r0le_physical" in fresh['kinks']:
-            fresh['kinks'].remove("n0t_a_r0le_physical")
-        if "n0t_a_r0le_psychic" in fresh['kinks']:
-            fresh['kinks'].remove("n0t_a_r0le_psychic")
-        if "n0t_a_r0le_extreme" in fresh['kinks']:
-            fresh['kinks'].remove("n0t_a_r0le_extreme")
+        # Remove placeholders
+        for placeholder in (
+            "n0t_a_r0le_bondage",
+            "n0t_a_r0le_physical",
+            "n0t_a_r0le_psychic",
+            "n0t_a_r0le_extreme"
+        ):
+            if placeholder in fresh["kinks"]:
+                fresh["kinks"].remove(placeholder)
 
-        # 6) Build a summary combining disclaimers + final selections
+        # Summarize
         summary_list = [
+            f"**Title**: {fresh['gender_role'] or 'None'}",
             f"**Age**: {fresh['age_range'] or 'None'}",
-            f"**Relationship**: {fresh['relationship'] or 'None'}",
             f"**Location**: {fresh['location'] or 'None'}",
             f"**Orientation**: {fresh['orientation'] or 'None'}",
             f"**DM Status**: {fresh['dm_status'] or 'None'}",
             f"**Here For**: {', '.join(fresh['here_for']) or 'None'}",
             f"**Ping Roles**: {', '.join(fresh['ping_roles']) or 'None'}",
-            f"**Kinks**: {', '.join(fresh['kinks']) if fresh['kinks'] else 'None'}",
+            f"**Kinks**: {', '.join(fresh['kinks']) or 'None'}",
         ]
         summary_str = "\n".join(summary_list)
 
-        final_message = f"{disclaimers}**Your final selections**:\n{summary_str}\n\nPreferences saved!"
+        final_msg = f"{disclaimers}**Your final selections**:\n{summary_str}\n\nPreferences saved!"
 
-        # 7) Send a single ephemeral message (disclaimer + summary) to avoid spam
-        await interaction.followup.send(
-            final_message,
-            ephemeral=True
-        )
+        # Show ephemeral final result
+        await interaction.followup.send(final_msg, ephemeral=True, delete_after=30.0)
 
-        # 8) Disable the view so the user can’t click again
+        # Disable the view
         self.clear_items()
         await interaction.followup.edit_message(message_id=interaction.message.id, view=self)
-        logger.debug(f"[finish_flow] Finished. View stopped for user_id={self.user.id}")
         self.stop()
 
 
@@ -578,13 +580,13 @@ class RolesFlowView(discord.ui.View):
 class AgeSelect(discord.ui.Select):
     def __init__(self, parent_view: RolesFlowView):
         current_value = parent_view.new_data["age"]
-        opts = []
-        for opt in AGE_OPTIONS:
-            selected = (opt.value == current_value)
-            opts.append(discord.SelectOption(
-                label=opt.label, value=opt.value, emoji=opt.emoji, default=selected
-            ))
-
+        opts = [
+            discord.SelectOption(
+                label=o.label, value=o.value, emoji=o.emoji,
+                default=(o.value == current_value)
+            )
+            for o in AGE_OPTIONS
+        ]
         super().__init__(placeholder="Select Age...", options=opts, max_values=1)
         self.parent_view = parent_view
 
@@ -592,49 +594,39 @@ class AgeSelect(discord.ui.Select):
         await self.parent_view.store_single_value(interaction, "age", self.values[0])
 
 
-class RelationshipSelect(discord.ui.Select):
+class GenderSelect(discord.ui.Select):
     def __init__(self, parent_view: RolesFlowView):
-        current_value = parent_view.new_data["relationship"]
-        opts = []
-        for opt in RELATIONSHIP_OPTIONS:
-            selected = (opt.value == current_value)
-            opts.append(discord.SelectOption(label=opt.label, value=opt.value, emoji=opt.emoji, default=selected))
-
-        super().__init__(placeholder="Select Relationship...", options=opts, max_values=1)
+        current_value = parent_view.new_data["gender_role"]
+        opts = [
+            discord.SelectOption(
+                label=o.label, value=o.value, emoji=o.emoji,
+                default=(o.value == current_value)
+            )
+            for o in GENDER_OPTIONS
+        ]
+        super().__init__(placeholder="Select 'Gentleman' or 'Harlot'...", options=opts, max_values=1)
         self.parent_view = parent_view
 
     async def callback(self, interaction: discord.Interaction):
-        await self.parent_view.store_single_value(interaction, "relationship", self.values[0])
+        await self.parent_view.store_single_value(interaction, "gender_role", self.values[0])
 
 
 class LocationSelect(discord.ui.Select):
     def __init__(self, parent_view: RolesFlowView):
         current_value = parent_view.new_data["location"]
-        opts = []
-        for opt in LOCATION_OPTIONS:
-            selected = (opt.value == current_value)
-            opts.append(discord.SelectOption(label=opt.label, value=opt.value, emoji=opt.emoji, default=selected))
-
+        opts = [
+            discord.SelectOption(
+                label=o.label, value=o.value, emoji=o.emoji,
+                default=(o.value == current_value)
+            )
+            for o in LOCATION_OPTIONS
+        ]
         super().__init__(placeholder="Select Location...", options=opts, max_values=1)
         self.parent_view = parent_view
 
     async def callback(self, interaction: discord.Interaction):
         await self.parent_view.store_single_value(interaction, "location", self.values[0])
 
-
-class OrientationSelect(discord.ui.Select):
-    def __init__(self, parent_view: RolesFlowView):
-        current_value = parent_view.new_data["orientation"]
-        opts = []
-        for opt in ORIENTATION_OPTIONS:
-            selected = (opt.value == current_value)
-            opts.append(discord.SelectOption(label=opt.label, value=opt.value, emoji=opt.emoji, default=selected))
-
-        super().__init__(placeholder="Select Orientation...", options=opts, max_values=1)
-        self.parent_view = parent_view
-
-    async def callback(self, interaction: discord.Interaction):
-        await self.parent_view.store_single_value(interaction, "orientation", self.values[0])
 
 class Page1NextButton(discord.ui.Button):
     def __init__(self, parent_view: RolesFlowView):
@@ -648,49 +640,38 @@ class Page1NextButton(discord.ui.Button):
 # PAGE 2 SELECTS
 ##############################################################################
 
-class DMStatusSelect(discord.ui.Select):
+class OrientationSelect(discord.ui.Select):
     def __init__(self, parent_view: RolesFlowView):
-        current_value = parent_view.new_data["dm_status"]
-        opts = []
-        for opt in DM_STATUS_OPTIONS:
-            selected = (opt.value == current_value)
-            opts.append(discord.SelectOption(label=opt.label, value=opt.value, emoji=opt.emoji, default=selected))
-
-        super().__init__(placeholder="Select DM Status...", options=opts, max_values=1)
+        current_value = parent_view.new_data["orientation"]
+        opts = [
+            discord.SelectOption(
+                label=o.label, value=o.value, emoji=o.emoji,
+                default=(o.value == current_value)
+            )
+            for o in ORIENTATION_OPTIONS
+        ]
+        super().__init__(placeholder="Select Orientation...", options=opts, max_values=1)
         self.parent_view = parent_view
 
     async def callback(self, interaction: discord.Interaction):
-        await self.parent_view.store_single_value(interaction, "dm_status", self.values[0])
+        await self.parent_view.store_single_value(interaction, "orientation", self.values[0])
 
 
 class HereForSelect(discord.ui.Select):
     def __init__(self, parent_view: RolesFlowView):
         current_set = set(parent_view.new_data["here_for"])
-        opts = []
-        for opt in HERE_FOR_OPTIONS:
-            selected = (opt.value in current_set)
-            opts.append(discord.SelectOption(label=opt.label, value=opt.value, emoji=opt.emoji, default=selected))
-
+        opts = [
+            discord.SelectOption(
+                label=o.label, value=o.value, emoji=o.emoji,
+                default=(o.value in current_set)
+            )
+            for o in HERE_FOR_OPTIONS
+        ]
         super().__init__(placeholder="Select what you're here for...", options=opts, max_values=len(opts))
         self.parent_view = parent_view
 
     async def callback(self, interaction: discord.Interaction):
         await self.parent_view.store_multi_value(interaction, "here_for", self.values)
-
-
-class PingRolesSelect(discord.ui.Select):
-    def __init__(self, parent_view: RolesFlowView):
-        current_set = set(parent_view.new_data["ping_roles"])
-        opts = []
-        for opt in PING_ROLES_OPTIONS:
-            selected = (opt.value in current_set)
-            opts.append(discord.SelectOption(label=opt.label, value=opt.value, emoji=opt.emoji, default=selected))
-
-        super().__init__(placeholder="Select Ping Roles...", options=opts, max_values=len(opts))
-        self.parent_view = parent_view
-
-    async def callback(self, interaction: discord.Interaction):
-        await self.parent_view.store_multi_value(interaction, "ping_roles", self.values)
 
 
 class Page2BackButton(discord.ui.Button):
@@ -714,68 +695,38 @@ class Page2NextButton(discord.ui.Button):
 # PAGE 3 SELECTS
 ##############################################################################
 
-class BondageRestraintsSelect(discord.ui.Select):
+class DMStatusSelect(discord.ui.Select):
     def __init__(self, parent_view: RolesFlowView):
-        current_kinks = set(parent_view.new_data["kinks"])
-        opts = []
-        for opt in KINKS_BONDAGE:
-            selected = (opt.value in current_kinks)
-            opts.append(discord.SelectOption(label=opt.label, value=opt.value, emoji=opt.emoji, default=selected))
-
-        super().__init__(placeholder="Bondage & Restraints", options=opts, max_values=len(opts))
+        current_value = parent_view.new_data["dm_status"]
+        opts = [
+            discord.SelectOption(
+                label=o.label, value=o.value, emoji=o.emoji,
+                default=(o.value == current_value)
+            )
+            for o in DM_STATUS_OPTIONS
+        ]
+        super().__init__(placeholder="Select DM Status...", options=opts, max_values=1)
         self.parent_view = parent_view
 
     async def callback(self, interaction: discord.Interaction):
-        cat_values = [o.value for o in KINKS_BONDAGE]
-        await self.parent_view.store_kinks_from_category(interaction, cat_values, self.values)
+        await self.parent_view.store_single_value(interaction, "dm_status", self.values[0])
 
 
-class BodyPhysicalSelect(discord.ui.Select):
+class PingRolesSelect(discord.ui.Select):
     def __init__(self, parent_view: RolesFlowView):
-        current_kinks = set(parent_view.new_data["kinks"])
-        opts = []
-        for opt in KINKS_BODY_PHYSICAL:
-            selected = (opt.value in current_kinks)
-            opts.append(discord.SelectOption(label=opt.label, value=opt.value, emoji=opt.emoji, default=selected))
-
-        super().__init__(placeholder="Body & Physical", options=opts, max_values=len(opts))
+        current_set = set(parent_view.new_data["ping_roles"])
+        opts = [
+            discord.SelectOption(
+                label=o.label, value=o.value, emoji=o.emoji,
+                default=(o.value in current_set)
+            )
+            for o in PING_ROLES_OPTIONS
+        ]
+        super().__init__(placeholder="Select Ping Roles...", options=opts, max_values=len(opts))
         self.parent_view = parent_view
 
     async def callback(self, interaction: discord.Interaction):
-        cat_values = [o.value for o in KINKS_BODY_PHYSICAL]
-        await self.parent_view.store_kinks_from_category(interaction, cat_values, self.values)
-
-
-class PsychEmotionalSelect(discord.ui.Select):
-    def __init__(self, parent_view: RolesFlowView):
-        current_kinks = set(parent_view.new_data["kinks"])
-        opts = []
-        for opt in KINKS_PSYCH:
-            selected = (opt.value in current_kinks)
-            opts.append(discord.SelectOption(label=opt.label, value=opt.value, emoji=opt.emoji, default=selected))
-
-        super().__init__(placeholder="Psych & Emotional", options=opts, max_values=len(opts))
-        self.parent_view = parent_view
-
-    async def callback(self, interaction: discord.Interaction):
-        cat_values = [o.value for o in KINKS_PSYCH]
-        await self.parent_view.store_kinks_from_category(interaction, cat_values, self.values)
-
-
-class EdgeExtremeSelect(discord.ui.Select):
-    def __init__(self, parent_view: RolesFlowView):
-        current_kinks = set(parent_view.new_data["kinks"])
-        opts = []
-        for opt in KINKS_EDGE_EXTREME:
-            selected = (opt.value in current_kinks)
-            opts.append(discord.SelectOption(label=opt.label, value=opt.value, emoji=opt.emoji, default=selected))
-
-        super().__init__(placeholder="Edge & Extreme", options=opts, max_values=len(opts))
-        self.parent_view = parent_view
-
-    async def callback(self, interaction: discord.Interaction):
-        cat_values = [o.value for o in KINKS_EDGE_EXTREME]
-        await self.parent_view.store_kinks_from_category(interaction, cat_values, self.values)
+        await self.parent_view.store_multi_value(interaction, "ping_roles", self.values)
 
 
 class Page3BackButton(discord.ui.Button):
@@ -787,13 +738,127 @@ class Page3BackButton(discord.ui.Button):
         await self.parent_view.previous_page(interaction)
 
 
-class FinishButton(discord.ui.Button):
+class Page3NextButton(discord.ui.Button):
     def __init__(self, parent_view: RolesFlowView):
-        super().__init__(label="Finish", style=discord.ButtonStyle.success)
+        super().__init__(label="Next", style=discord.ButtonStyle.primary)
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.parent_view.next_page(interaction)
+
+##############################################################################
+# PAGE 4 SELECTS
+##############################################################################
+
+class BondageRestraintsSelect(discord.ui.Select):
+    def __init__(self, parent_view: RolesFlowView, row: int = 0):
+        current_kinks = set(parent_view.new_data["kinks"])
+        opts = [
+            discord.SelectOption(
+                label=o.label, value=o.value, emoji=o.emoji,
+                default=(o.value in current_kinks)
+            )
+            for o in KINKS_BONDAGE
+        ]
+        super().__init__(
+            placeholder="Bondage & Restraints",
+            options=opts,
+            max_values=len(opts),
+            row=row
+        )
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
+        cat_values = [o.value for o in KINKS_BONDAGE]
+        await self.parent_view.store_kinks_from_category(interaction, cat_values, self.values)
+
+
+class BodyPhysicalSelect(discord.ui.Select):
+    def __init__(self, parent_view: RolesFlowView, row: int = 0):
+        current_kinks = set(parent_view.new_data["kinks"])
+        opts = [
+            discord.SelectOption(
+                label=o.label, value=o.value, emoji=o.emoji,
+                default=(o.value in current_kinks)
+            )
+            for o in KINKS_BODY_PHYSICAL
+        ]
+        super().__init__(
+            placeholder="Body & Physical",
+            options=opts,
+            max_values=len(opts),
+            row=row
+        )
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
+        cat_values = [o.value for o in KINKS_BODY_PHYSICAL]
+        await self.parent_view.store_kinks_from_category(interaction, cat_values, self.values)
+
+
+class PsychEmotionalSelect(discord.ui.Select):
+    def __init__(self, parent_view: RolesFlowView, row: int = 0):
+        current_kinks = set(parent_view.new_data["kinks"])
+        opts = [
+            discord.SelectOption(
+                label=o.label, value=o.value, emoji=o.emoji,
+                default=(o.value in current_kinks)
+            )
+            for o in KINKS_PSYCH
+        ]
+        super().__init__(
+            placeholder="Psych & Emotional",
+            options=opts,
+            max_values=len(opts),
+            row=row
+        )
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
+        cat_values = [o.value for o in KINKS_PSYCH]
+        await self.parent_view.store_kinks_from_category(interaction, cat_values, self.values)
+
+
+class EdgeExtremeSelect(discord.ui.Select):
+    def __init__(self, parent_view: RolesFlowView, row: int = 0):
+        current_kinks = set(parent_view.new_data["kinks"])
+        opts = [
+            discord.SelectOption(
+                label=o.label, value=o.value, emoji=o.emoji,
+                default=(o.value in current_kinks)
+            )
+            for o in KINKS_EDGE_EXTREME
+        ]
+        super().__init__(
+            placeholder="Edge & Extreme",
+            options=opts,
+            max_values=len(opts),
+            row=row
+        )
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
+        cat_values = [o.value for o in KINKS_EDGE_EXTREME]
+        await self.parent_view.store_kinks_from_category(interaction, cat_values, self.values)
+
+
+class Page4BackButton(discord.ui.Button):
+    def __init__(self, parent_view: RolesFlowView, row: int = 4):
+        super().__init__(label="Back", style=discord.ButtonStyle.secondary, row=row)
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.parent_view.previous_page(interaction)
+
+
+class FinishButton(discord.ui.Button):
+    def __init__(self, parent_view: RolesFlowView, row: int = 4):
+        super().__init__(label="Finish", style=discord.ButtonStyle.success, row=row)
         self.parent_view = parent_view
 
     async def callback(self, interaction: discord.Interaction):
         await self.parent_view.finish_flow(interaction)
+
 
 ##############################################################################
 # SETUP

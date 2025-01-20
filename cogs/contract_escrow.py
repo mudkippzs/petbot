@@ -74,7 +74,7 @@ class ContractEscrowCog(commands.Cog):
             if interaction.user.id == seller.id:
                 # Seller can't make an offer to themselves
                 return asyncio.create_task(interaction.response.send_message(
-                    "You can't buy your own service!", ephemeral=True
+                    "You can't buy your own service!", ephemeral=True, delete_after=10.0
                 ))
 
             modal = OfferCreationModal()
@@ -99,7 +99,7 @@ class ContractEscrowCog(commands.Cog):
                 if buyer_balance < offer_price:
                     await interaction.followup.send(
                         f"You don't have enough balance ({buyer_balance}) for this offer.",
-                        ephemeral=True
+                        ephemeral=True, delete_after=10.0
                     )
                     return
 
@@ -144,18 +144,18 @@ class ContractEscrowCog(commands.Cog):
                             # Seller declined
                             await dm_channel.send("You have **declined** the offer.")
                             await interaction.followup.send(
-                                "Seller declined your offer.", ephemeral=True
+                                "Seller declined your offer.", ephemeral=True, delete_after=30.0
                             )
                     except asyncio.TimeoutError:
                         await dm_channel.send("Offer timed out. No action taken.")
                         await interaction.followup.send(
-                            "Offer timed out—seller didn’t respond.", ephemeral=True
+                            "Offer timed out—seller didn’t respond.", ephemeral=True, delete_after=30.0
                         )
                 except discord.Forbidden:
                     # Seller's DMs might be off
                     await interaction.followup.send(
                         f"Could not DM {seller_user.mention}. They may have DMs disabled.",
-                        ephemeral=True
+                        ephemeral=True, delete_after=30.0
                     )
 
             # Present the modal to the buyer
@@ -171,7 +171,7 @@ class ContractEscrowCog(commands.Cog):
             if interaction.user.id != seller.id:
                 return asyncio.create_task(
                     interaction.response.send_message(
-                        "Only the seller can delete this advert.", ephemeral=True
+                        "Only the seller can delete this advert.", ephemeral=True, delete_after=30.0
                     )
                 )
             # Delete the original advert message
@@ -186,7 +186,7 @@ class ContractEscrowCog(commands.Cog):
         # In your environment, you might want a #the-trading channel specifically.
         channel = ctx.channel
         sent_msg = await channel.send(embed=embed, view=advert_view)
-        await ctx.followup.send("Advert posted!", ephemeral=True)
+        await ctx.followup.send("Advert posted!", ephemeral=True, delete_after=30.0)
 
     # ---------------------------- CONTRACT CREATION ----------------------------
     async def create_contract(self, seller_id: int, buyer_id: int, amount: int, description: str, interaction: discord.Interaction):
@@ -255,7 +255,7 @@ class ContractEscrowCog(commands.Cog):
         # Mark in DB as completed
         contract_data = await self.db_get_contract(contract_id)
         if not contract_data:
-            return await interaction.followup.send("Contract record not found. Something's off.", ephemeral=True)
+            return await interaction.followup.send("Contract record not found. Something's off.", ephemeral=True, delete_after=30.0)
 
         buyer_id = contract_data["buyer_id"]
         seller_id = contract_data["seller_id"]
@@ -276,7 +276,7 @@ class ContractEscrowCog(commands.Cog):
         contract_id = self.parse_contract_id_from_embed(interaction.message.embeds[0])
         contract_data = await self.db_get_contract(contract_id)
         if not contract_data:
-            return await interaction.followup.send("Contract record not found. Something's off.", ephemeral=True)
+            return await interaction.followup.send("Contract record not found. Something's off.", ephemeral=True, delete_after=30.0)
 
         buyer_id = contract_data["buyer_id"]
         seller_id = contract_data["seller_id"]
@@ -298,7 +298,7 @@ class ContractEscrowCog(commands.Cog):
         contract_id = self.parse_contract_id_from_embed(interaction.message.embeds[0])
         contract_data = await self.db_get_contract(contract_id)
         if not contract_data:
-            return await interaction.response.send_message("Contract record not found.", ephemeral=True)
+            return await interaction.response.send_message("Contract record not found.", ephemeral=True, delete_after=30.0)
 
         buyer_id = contract_data["buyer_id"]
         seller_id = contract_data["seller_id"]
@@ -312,7 +312,7 @@ class ContractEscrowCog(commands.Cog):
         if not staff_channel:
             return await interaction.response.send_message(
                 "Staff channel not configured properly. Dispute noted but no staff alert sent.",
-                ephemeral=True
+                ephemeral=True, delete_after=30.0
             )
 
         embed = discord.Embed(
@@ -330,7 +330,7 @@ class ContractEscrowCog(commands.Cog):
 
         await staff_channel.send(content="A dispute has been raised:", embed=embed)
         await interaction.response.send_message(
-            "Dispute raised. Staff has been notified. Contract is on hold.", ephemeral=True
+            "Dispute raised. Staff has been notified. Contract is on hold.", ephemeral=True, delete_after=30.0
         )
 
     @contract_staff_group.command(name="resolve_dispute", description="Resolve a disputed contract by forcibly awarding or refunding.")
@@ -343,10 +343,10 @@ class ContractEscrowCog(commands.Cog):
         await ctx.defer(ephemeral=True)
         contract_data = await self.db_get_contract(contract_id)
         if not contract_data:
-            return await ctx.followup.send("Contract not found.", ephemeral=True)
+            return await ctx.followup.send("Contract not found.", ephemeral=True, delete_after=30.0)
 
         if contract_data["status"] != "disputed":
-            return await ctx.followup.send("Contract is not in a 'disputed' state.", ephemeral=True)
+            return await ctx.followup.send("Contract is not in a 'disputed' state.", ephemeral=True, delete_after=30.0)
 
         buyer_id = contract_data["buyer_id"]
         seller_id = contract_data["seller_id"]
@@ -357,14 +357,14 @@ class ContractEscrowCog(commands.Cog):
             await self.db_update_contract_status(contract_id, "staff_refund")
             await ctx.followup.send(
                 f"Contract #{contract_id} forcibly refunded to buyer <@{buyer_id}>.",
-                ephemeral=True
+                ephemeral=True, delete_after=30.0
             )
         elif resolution == "pay_seller":
             await self.add_user_balance(seller_id, amount)
             await self.db_update_contract_status(contract_id, "staff_payout")
             await ctx.followup.send(
                 f"Contract #{contract_id} forcibly paid out to seller <@{seller_id}>.",
-                ephemeral=True
+                ephemeral=True, delete_after=30.0
             )
         elif resolution == "split" and self.features.get("enable_dispute_split", False):
             # Example partial logic: 50/50
@@ -375,7 +375,7 @@ class ContractEscrowCog(commands.Cog):
             await self.db_update_contract_status(contract_id, "staff_split")
             await ctx.followup.send(
                 f"Contract #{contract_id} forcibly split: Buyer got {half}, Seller got {half + remainder}.",
-                ephemeral=True
+                ephemeral=True, delete_after=30.0
             )
         else:
             await ctx.followup.send("Invalid resolution or 'split' feature not enabled.", ephemeral=True)
