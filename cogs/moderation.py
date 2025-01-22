@@ -298,6 +298,56 @@ class ModerationCog(commands.Cog):
 
         await ctx.followup.send(f"{member.mention} has been warned. Reason: {reason}", ephemeral=True, delete_after=30.0)
 
+    @moderation_group.command(
+    name="clear_all_roles",
+    description="DEVELOPER-ONLY: This will remove all roles from selected/all users (except Boss role)."
+        )
+    @commands.has_any_role("Boss", "Underboss", "Consigliere")
+    async def clear_all_roles(
+        self,
+        ctx: discord.ApplicationContext,
+        member: Option(discord.Member, "(Optional) User's roles to clear - leave blank to clear all user's roles.", required=False)
+    ):
+        logger.debug("Clearing roles...")
+        owner_role = discord.utils.get(ctx.guild.roles, name="Owner")  # Adjust role name as needed
+        boss_role = discord.utils.get(ctx.guild.roles, name="Boss")  # Adjust role name as needed
+        underboss_role = discord.utils.get(ctx.guild.roles, name="Underboss")  # Adjust role name as needed
+        consigliere_role = discord.utils.get(ctx.guild.roles, name="Consigliere")  # Adjust role name as needed
+        
+        safe_roles = [boss_role, underboss_role, consigliere_role, owner_role]
+        
+        logger.debug(f"Safe roles: {safe_roles}")
+
+        if not boss_role:
+            await ctx.respond("Boss role not found. Aborting operation.", ephemeral=True)
+            return
+        if not underboss_role:
+            await ctx.respond("Underboss role not found. Aborting operation.", ephemeral=True)
+            return
+        if not consigliere_role:
+            await ctx.respond("Consigliere role not found. Aborting operation.", ephemeral=True)
+            return
+
+        async def remove_roles(target_member):
+            # Exclude the "Boss" role
+            roles_to_remove = [role for role in target_member.roles if role != ctx.guild.default_role and role not in safe_roles]
+            logger.debug(f"For user: {target_member.display_name} - Attempting to remove roles: {roles_to_remove}")
+            await target_member.remove_roles(*roles_to_remove, reason="Clear all roles command used.")
+
+        if member:
+            try:
+                await remove_roles(member)
+                await ctx.respond(f"All roles (except Boss) have been cleared for {member.mention}.", ephemeral=True, delete_after=60)
+            except discord.HTTPException as e:
+                await ctx.respond(f"Failed to clear roles for {member.mention}. Error: {e}", ephemeral=True)
+        else:
+            await ctx.defer(ephemeral=True)  # Acknowledge the command while it processes
+            try:
+                for guild_member in ctx.guild.members:
+                    await remove_roles(guild_member)
+                await ctx.respond("All roles (except Boss) have been cleared for all members.", ephemeral=True, delete_after=60)
+            except discord.HTTPException as e:
+                await ctx.respond(f"Failed to clear roles for all members. Error: {e}", ephemeral=True)
 
 def setup(bot: "MoguMoguBot"):
     bot.add_cog(ModerationCog(bot))

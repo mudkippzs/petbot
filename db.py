@@ -6,6 +6,7 @@ import asyncio
 import subprocess
 from typing import Any, Dict, Optional, List
 
+
 class Database:
     """
     A database manager utilizing asyncpg for asynchronous PostgreSQL operations.
@@ -32,7 +33,8 @@ class Database:
                 host=db_conf["host"],
                 max_size=10
             )
-            logger.info("Database connected and connection pool created successfully.")
+            logger.info(
+                "Database connected and connection pool created successfully.")
             await self.ensure_tables()
         except Exception as e:
             logger.exception(f"Failed to connect to the database: {e}")
@@ -80,6 +82,23 @@ class Database:
         async with self.pool.acquire() as conn:
             return await conn.fetch(query, *args)
 
+    async def fetchval(self, query: str, *args: Any) -> Any:
+        """
+        Execute a SQL query and return a single value from the first record.
+        
+        Parameters:
+            query (str): The SQL query string.
+            *args (Any): Parameters for the SQL query.
+
+        Returns:
+            Any: The value of the first column of the first row, or None if no rows.
+        """
+        if not self.pool:
+            logger.error("Database pool not initialized. Cannot fetch value.")
+            return None
+        async with self.pool.acquire() as conn:
+            return await conn.fetchval(query, *args)
+
     async def execute(self, query: str, *args: Any) -> str:
         """
         Execute a SQL command (INSERT, UPDATE, DELETE, etc.).
@@ -92,7 +111,8 @@ class Database:
             str: A status message indicating the number of rows affected.
         """
         if not self.pool:
-            logger.error("Database pool not initialized. Cannot execute query.")
+            logger.error(
+                "Database pool not initialized. Cannot execute query.")
             return "ERROR"
         async with self.pool.acquire() as conn:
             return await conn.execute(query, *args)
@@ -103,7 +123,6 @@ class Database:
         is ready for use by the bot.
         """
         create_statements = [
-            # Subs & Ownership
             """
             CREATE TABLE IF NOT EXISTS subs (
                 id SERIAL PRIMARY KEY,
@@ -138,7 +157,6 @@ class Database:
                 description TEXT
             );
             """,
-            # Auctions & Marketplace
             """
             CREATE TABLE IF NOT EXISTS auctions (
                 id SERIAL PRIMARY KEY,
@@ -169,8 +187,6 @@ class Database:
                 status TEXT DEFAULT 'pending'
             );
             """,
-
-            # Contracts & Escrow
             """
             CREATE TABLE IF NOT EXISTS contracts (
                 id SERIAL PRIMARY KEY,
@@ -191,8 +207,6 @@ class Database:
                 approved_by_seller BOOLEAN DEFAULT FALSE
             );
             """,
-
-            # Events & Temporary Channels
             """
             CREATE TABLE IF NOT EXISTS events (
                 id SERIAL PRIMARY KEY,
@@ -201,8 +215,6 @@ class Database:
                 end_time TIMESTAMP
             );
             """,
-
-            # Reputation & Reviews
             """
             CREATE TABLE IF NOT EXISTS reviews (
                 id SERIAL PRIMARY KEY,
@@ -213,15 +225,12 @@ class Database:
                 timestamp TIMESTAMP DEFAULT NOW()
             );
             """,
-
-            # Tips & Economy
             """
             CREATE TABLE IF NOT EXISTS wallets (
                 user_id BIGINT PRIMARY KEY,
                 balance INT DEFAULT 0
             );
             """,
-            # Server Management & Config
             """
             CREATE TABLE IF NOT EXISTS server_config (
                 key TEXT PRIMARY KEY,
@@ -300,8 +309,6 @@ class Database:
                 sub_msg_id BIGINT
             );
             """,
-
-            # The many-to-many "staff approvals" for a claim
             """
             CREATE TABLE IF NOT EXISTS claims_staff_approvals (
                 claim_id INT REFERENCES claims(id) ON DELETE CASCADE,
@@ -309,8 +316,6 @@ class Database:
                 PRIMARY KEY (claim_id, staff_id)
             );
             """,
-
-            # The "dm_ownership_views" table for storing message IDs in "🔍" DM views
             """
             CREATE TABLE IF NOT EXISTS dm_ownership_views (
                 message_id BIGINT PRIMARY KEY,
@@ -330,11 +335,55 @@ class Database:
                 hash TEXT,
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-"""
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS rules_acceptance (
+                user_id BIGINT PRIMARY KEY,
+                accepted_at TIMESTAMP NOT NULL
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS rules_acceptance_log (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL,
+                event TEXT NOT NULL,       
+                timestamp TIMESTAMP DEFAULT NOW()
+            );""",
+            """
+            CREATE TABLE IF NOT EXISTS rules_text (
+                id SERIAL PRIMARY KEY,
+                ssc TEXT NOT NULL,
+                rack TEXT NOT NULL,
+                prick TEXT NOT NULL,
+                final_notes TEXT NOT NULL
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS verification_requests (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL,
+                q1 TEXT NOT NULL,
+                q2 TEXT NOT NULL,
+                q3 TEXT NOT NULL,
+                status TEXT DEFAULT 'pending',  -- e.g. "pending", "approved", "rejected"
+                staff_approvals INT DEFAULT 0,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                log_message_id BIGINT DEFAULT 0
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS verification_approvals (
+                verification_id INT NOT NULL REFERENCES verification_requests(id) ON DELETE CASCADE,
+                staff_id BIGINT NOT NULL,
+                PRIMARY KEY (verification_id, staff_id)
+            );
+            """
         ]
 
         if not self.pool:
-            logger.error("Database pool not initialized. Cannot ensure tables.")
+            logger.error(
+                "Database pool not initialized. Cannot ensure tables.")
             return
 
         async with self.pool.acquire() as conn:
@@ -351,7 +400,8 @@ class Database:
                 ADD COLUMN IF NOT EXISTS lease_duration_days INT;
             """)
 
-        logger.info("All tables ensured (created if missing, altered if needed).")
+        logger.info(
+            "All tables ensured (created if missing, altered if needed).")
 
     async def backup_database(self) -> Optional[str]:
         """
@@ -389,7 +439,8 @@ class Database:
             logger.info("Database backup completed successfully.")
             return backup_data
         except FileNotFoundError:
-            logger.error("pg_dump not found. Please ensure it is installed and in PATH.")
+            logger.error(
+                "pg_dump not found. Please ensure it is installed and in PATH.")
         except Exception as e:
             logger.exception(f"Unexpected error during database backup: {e}")
 
