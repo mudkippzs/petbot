@@ -128,7 +128,7 @@ class EventsCog(commands.Cog):
                     manage_channels=True
                 )
 
-        category_id = self.bot.config.get("event_category_id")  # Optional configuration
+        category_id = self.bot.config.get("voice_chat_category_id")  # Optional configuration
         category = ctx.guild.get_channel(category_id) if category_id else None
 
         # Create the channel

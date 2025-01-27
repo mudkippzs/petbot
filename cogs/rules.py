@@ -58,6 +58,7 @@ class RulesCog(commands.Cog):
         )
         # We just re-attach; no need to .edit() since the message embed probably matches DB already
         self.bot.add_view(view, message_id=msg.id)
+        logger.debug(f"Reattached to existing rules modal message {msg.id}")
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):

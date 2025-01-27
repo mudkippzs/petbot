@@ -123,108 +123,7 @@ class Database:
         is ready for use by the bot.
         """
         create_statements = [
-            """
-            CREATE TABLE IF NOT EXISTS subs (
-                id SERIAL PRIMARY KEY,
-                name TEXT NOT NULL,
-                description TEXT,
-                primary_owner_id BIGINT,
-                created_at TIMESTAMP DEFAULT NOW()
-            );
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS sub_ownership (
-                sub_id INT REFERENCES subs(id) ON DELETE CASCADE,
-                user_id BIGINT,
-                percentage INT,
-                PRIMARY KEY (sub_id, user_id)
-            );
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS sub_subscribers (
-                sub_id INT REFERENCES subs(id) ON DELETE CASCADE,
-                user_id BIGINT,
-                next_payment_due TIMESTAMP,
-                PRIMARY KEY (sub_id, user_id)
-            );
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS sub_services (
-                id SERIAL PRIMARY KEY,
-                sub_id INT REFERENCES subs(id) ON DELETE CASCADE,
-                name TEXT,
-                price INT,
-                description TEXT
-            );
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS auctions (
-                id SERIAL PRIMARY KEY,
-                sub_id INT REFERENCES subs(id) ON DELETE CASCADE,
-                type TEXT,
-                visibility TEXT,
-                starting_price INT,
-                active BOOLEAN DEFAULT TRUE,
-                end_time TIMESTAMP
-            );
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS bids (
-                id SERIAL PRIMARY KEY,
-                auction_id INT REFERENCES auctions(id) ON DELETE CASCADE,
-                bidder_id BIGINT,
-                amount INT,
-                timestamp TIMESTAMP DEFAULT NOW()
-            );
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS offers (
-                id SERIAL PRIMARY KEY,
-                sub_id INT REFERENCES subs(id) ON DELETE CASCADE,
-                sender_id BIGINT,
-                amount INT,
-                anonymous BOOLEAN DEFAULT FALSE,
-                status TEXT DEFAULT 'pending'
-            );
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS contracts (
-                id SERIAL PRIMARY KEY,
-                buyer_id BIGINT,
-                sub_id INT REFERENCES subs(id) ON DELETE CASCADE,
-                service_id INT REFERENCES sub_services(id) ON DELETE CASCADE,
-                total_price INT,
-                escrow_amount INT,
-                status TEXT DEFAULT 'active'
-            );
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS contract_milestones (
-                id SERIAL PRIMARY KEY,
-                contract_id INT REFERENCES contracts(id) ON DELETE CASCADE,
-                description TEXT,
-                approved_by_buyer BOOLEAN DEFAULT FALSE,
-                approved_by_seller BOOLEAN DEFAULT FALSE
-            );
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS events (
-                id SERIAL PRIMARY KEY,
-                sub_id INT REFERENCES subs(id) ON DELETE CASCADE,
-                channel_id BIGINT,
-                end_time TIMESTAMP
-            );
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS reviews (
-                id SERIAL PRIMARY KEY,
-                sub_id INT REFERENCES subs(id) ON DELETE CASCADE,
-                user_id BIGINT,
-                rating INT,
-                comment TEXT,
-                timestamp TIMESTAMP DEFAULT NOW()
-            );
-            """,
+            # Tables without foreign key dependencies        
             """
             CREATE TABLE IF NOT EXISTS wallets (
                 user_id BIGINT PRIMARY KEY,
@@ -244,57 +143,167 @@ class Database:
             """,
             """
             CREATE TABLE IF NOT EXISTS moderation_logs (
-              id SERIAL PRIMARY KEY,
-              moderator_id BIGINT,
-              user_id BIGINT,
-              action TEXT,          -- e.g. 'ban', 'kick', 'mute', etc.
-              reason TEXT,
-              timestamp TIMESTAMP DEFAULT NOW()
+                id SERIAL PRIMARY KEY,
+                moderator_id BIGINT,
+                user_id BIGINT,
+                action TEXT,          -- e.g. 'ban', 'kick', 'mute', etc.
+                reason TEXT,
+                timestamp TIMESTAMP DEFAULT NOW()
             );
             """,
             """
             CREATE TABLE IF NOT EXISTS warnings (
-              id SERIAL PRIMARY KEY,
-              user_id BIGINT,
-              moderator_id BIGINT,
-              reason TEXT,
-              timestamp TIMESTAMP DEFAULT NOW()
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT,
+                moderator_id BIGINT,
+                reason TEXT,
+                timestamp TIMESTAMP DEFAULT NOW()
             );
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS tickets (
-              id SERIAL PRIMARY KEY,
-              user_id BIGINT,              -- user who opened ticket
-              channel_id BIGINT,           -- Discord channel ID for the ticket
-              status TEXT DEFAULT 'open',  -- e.g. open, closed
-              created_at TIMESTAMP DEFAULT NOW(),
-              closed_at TIMESTAMP
-            );
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS ticket_participants (
-              ticket_id INT REFERENCES tickets(id) ON DELETE CASCADE,
-              user_id BIGINT,
-              added_by BIGINT,            -- who added this user (optional)
-              joined_at TIMESTAMP DEFAULT NOW(),
-              PRIMARY KEY (ticket_id, user_id)
-            );
-
             """,
             """
             CREATE TABLE IF NOT EXISTS user_roles (
-                user_id      BIGINT PRIMARY KEY,
-                age_range    TEXT,
-                gender_role    TEXT,
+                user_id BIGINT PRIMARY KEY,
+                age_range TEXT,
+                gender_role TEXT,
                 relationship TEXT,
-                location     TEXT,
-                orientation  TEXT,
-                dm_status    TEXT,
-                here_for     TEXT[],
-                ping_roles   TEXT[],
-                kinks        TEXT[],
-                created_at   TIMESTAMP DEFAULT NOW(),
-                updated_at   TIMESTAMP DEFAULT NOW()
+                location TEXT,
+                orientation TEXT,
+                dm_status TEXT,
+                here_for TEXT[],
+                ping_roles TEXT[],
+                kinks TEXT[],
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS rules_acceptance (
+                user_id BIGINT PRIMARY KEY,
+                accepted_at TIMESTAMP NOT NULL
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS rules_text (
+                id SERIAL PRIMARY KEY,
+                ssc TEXT NOT NULL,
+                rack TEXT NOT NULL,
+                prick TEXT NOT NULL,
+                final_notes TEXT NOT NULL
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS user_cooldowns (
+                user_id BIGINT PRIMARY KEY,
+                global_cooldown_until TIMESTAMP
+            );
+            """,
+
+            # Add open_dm_perms table
+            """
+            CREATE TABLE IF NOT EXISTS open_dm_perms (
+                user1_id BIGINT NOT NULL,
+                user2_id BIGINT NOT NULL,
+                PRIMARY KEY (user1_id, user2_id),
+                CHECK (user1_id < user2_id)  -- Enforce user1_id is always less than user2_id
+            );
+            """,
+
+            # Tables with foreign key dependencies
+            """
+            CREATE TABLE IF NOT EXISTS sub_ownership (
+                sub_id BIGINT NOT NULL,
+                user_id BIGINT,
+                percentage INT,
+                PRIMARY KEY (sub_id, user_id)
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS sub_subscribers (
+                sub_id BIGINT NOT NULL,
+                user_id BIGINT,
+                next_payment_due TIMESTAMP,
+                PRIMARY KEY (sub_id, user_id)
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS sub_services (
+                id SERIAL PRIMARY KEY,
+                sub_id BIGINT NOT NULL,
+                name TEXT,
+                price INT,
+                description TEXT
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS auctions (
+                id SERIAL PRIMARY KEY,
+                sub_id BIGINT NOT NULL,
+                type TEXT,
+                visibility TEXT,
+                starting_price INT,
+                active BOOLEAN DEFAULT TRUE,
+                end_time TIMESTAMP,
+                creator_id BIGINT,
+                shares_for_sale INT DEFAULT 100,
+                service_id INT REFERENCES sub_services(id) ON DELETE SET NULL,
+                lease_duration_days INT
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS bids (
+                id SERIAL PRIMARY KEY,
+                auction_id INT REFERENCES auctions(id) ON DELETE CASCADE,
+                bidder_id BIGINT,
+                amount INT,
+                timestamp TIMESTAMP DEFAULT NOW()
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS contracts (
+                id SERIAL PRIMARY KEY,
+                buyer_id BIGINT,
+                sub_id BIGINT NOT NULL,
+                service_id INT REFERENCES sub_services(id) ON DELETE CASCADE,
+                total_price INT,
+                escrow_amount INT,
+                status TEXT DEFAULT 'active'
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS contract_milestones (
+                id SERIAL PRIMARY KEY,
+                contract_id INT REFERENCES contracts(id) ON DELETE CASCADE,
+                description TEXT,
+                approved_by_buyer BOOLEAN DEFAULT FALSE,
+                approved_by_seller BOOLEAN DEFAULT FALSE
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS events (
+                id SERIAL PRIMARY KEY,
+                sub_id BIGINT NOT NULL,
+                channel_id BIGINT,
+                end_time TIMESTAMP
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS reviews (
+                id SERIAL PRIMARY KEY,
+                sub_id BIGINT NOT NULL,
+                user_id BIGINT,
+                rating INT,
+                comment TEXT,
+                timestamp TIMESTAMP DEFAULT NOW()
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS offers (
+                id SERIAL PRIMARY KEY,
+                sub_id BIGINT NOT NULL,
+                sender_id BIGINT,
+                amount INT,
+                anonymous BOOLEAN DEFAULT FALSE,
+                status TEXT DEFAULT 'pending'
             );
             """,
             """
@@ -306,7 +315,16 @@ class Database:
                 sub_approved BOOLEAN DEFAULT FALSE,
                 status TEXT DEFAULT 'pending',
                 staff_msg_id BIGINT,
-                sub_msg_id BIGINT
+                sub_msg_id BIGINT,                
+                majority_owner_id BIGINT,
+                requested_percentage INT,
+                counter_percentage INT,
+                justification TEXT,
+                counter_justification TEXT,
+                rejection_reason TEXT,
+                expires_at TIMESTAMP,
+                cooldown_exempt BOOLEAN DEFAULT FALSE,
+                require_staff_approval BOOLEAN DEFAULT FALSE
             );
             """,
             """
@@ -337,25 +355,11 @@ class Database:
             );
             """,
             """
-            CREATE TABLE IF NOT EXISTS rules_acceptance (
-                user_id BIGINT PRIMARY KEY,
-                accepted_at TIMESTAMP NOT NULL
-            );
-            """,
-            """
             CREATE TABLE IF NOT EXISTS rules_acceptance_log (
                 id SERIAL PRIMARY KEY,
                 user_id BIGINT NOT NULL,
                 event TEXT NOT NULL,       
                 timestamp TIMESTAMP DEFAULT NOW()
-            );""",
-            """
-            CREATE TABLE IF NOT EXISTS rules_text (
-                id SERIAL PRIMARY KEY,
-                ssc TEXT NOT NULL,
-                rack TEXT NOT NULL,
-                prick TEXT NOT NULL,
-                final_notes TEXT NOT NULL
             );
             """,
             """
@@ -378,30 +382,38 @@ class Database:
                 staff_id BIGINT NOT NULL,
                 PRIMARY KEY (verification_id, staff_id)
             );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS tickets (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT,              -- user who opened ticket
+                channel_id BIGINT,           -- Discord channel ID for the ticket
+                status TEXT DEFAULT 'open',  -- e.g. open, closed
+                created_at TIMESTAMP DEFAULT NOW(),
+                closed_at TIMESTAMP
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS ticket_participants (
+                ticket_id INT REFERENCES tickets(id) ON DELETE CASCADE,
+                user_id BIGINT,
+                added_by BIGINT,            -- who added this user (optional)
+                joined_at TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (ticket_id, user_id)
+            );
             """
         ]
 
+
         if not self.pool:
-            logger.error(
-                "Database pool not initialized. Cannot ensure tables.")
+            logger.error("Database pool not initialized. Cannot ensure tables.")
             return
 
         async with self.pool.acquire() as conn:
-            for stmt in create_statements:
-                await conn.execute(stmt)
+            for statement in create_statements:
+                await conn.execute(statement)
 
-            # Add missing columns to auctions if they don't exist:
-            # creator_id, shares_for_sale, service_id, lease_duration_days
-            await conn.execute("""
-                ALTER TABLE auctions
-                ADD COLUMN IF NOT EXISTS creator_id BIGINT,
-                ADD COLUMN IF NOT EXISTS shares_for_sale INT DEFAULT 100,
-                ADD COLUMN IF NOT EXISTS service_id INT REFERENCES sub_services(id) ON DELETE SET NULL,
-                ADD COLUMN IF NOT EXISTS lease_duration_days INT;
-            """)
-
-        logger.info(
-            "All tables ensured (created if missing, altered if needed).")
+        logger.info("All tables ensured (created if missing, altered if needed).")
 
     async def backup_database(self) -> Optional[str]:
         """

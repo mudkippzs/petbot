@@ -28,11 +28,11 @@ class SupportTicketCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.support_channel_id = bot.config.get("support_channel_id")  # 'contact-the-boss' channel
-        self.verification_channel_id = bot.config.get("verification_channel_id", VERIFICATION_LOG_CHANNEL_ID)
+        self.staff_verification_channel_id = bot.config.get("staff_verification_channel_id", VERIFICATION_LOG_CHANNEL_ID)
         self.staff_roles = bot.config.get("staff_roles", STAFF_ROLE_NAMES)
-        self.transcripts_enabled = bot.config.get("transcripts_enabled", True)
-        self.inactivity_limit = bot.config.get("inactivity_limit", 48)
-        self.kick_on_rejection = bot.config.get("kick_on_rejection", False)  # from config.json
+        self.transcripts_enabled = bot.config.get("support_ticket_transcripts_enabled", True)
+        self.inactivity_limit = bot.config.get("suport_ticklet_inactivity_limit", 48)
+        self.kick_on_rejection = bot.config.get("verification_kick_on_rejection", False)  # from config.json
         self.ticket_cleanup_loop.start()
 
     @tasks.loop(hours=1)
@@ -46,12 +46,27 @@ class SupportTicketCog(commands.Cog):
             return
 
         now = datetime.datetime.utcnow()
-        async for thread in support_channel.threads:
+
+        # Use a normal `for` instead of `async for` since threads is just a list
+        for thread in support_channel.threads:
             if thread.archived:
                 continue
-            last_message = await thread.fetch_message(thread.last_message_id)
+            
+            # Guard: If there's no last_message_id, skip it
+            if not thread.last_message_id:
+                continue
+            
+            # Fetch the last message in the thread
+            try:
+                last_message = await thread.fetch_message(thread.last_message_id)
+            except discord.NotFound:
+                # The message may have been deleted or couldn't be fetched
+                continue
+            
             if not last_message:
                 continue
+            
+            # Calculate inactivity
             last_activity = last_message.created_at
             inactivity_duration = (now - last_activity).total_seconds() / 3600
             if inactivity_duration >= self.inactivity_limit:
@@ -109,6 +124,7 @@ class SupportTicketCog(commands.Cog):
         view = SplashContactView(bot=self.bot)
         self.bot.add_view(view)  # Make the view persistent across restarts
 
+
         embed = self.build_support_embed()
         async for msg in support_channel.history(limit=50):
             if (msg.author == self.bot.user) and ("Support Instructions" in msg.content or "Support System" in msg.content):
@@ -117,6 +133,7 @@ class SupportTicketCog(commands.Cog):
                     embed=embed,
                     view=view
                 )
+                logger.debug(f"Reattached to existing support modal message: {msg.id}")
                 break
         else:
             await support_channel.send(
@@ -124,6 +141,7 @@ class SupportTicketCog(commands.Cog):
                 embed=embed,
                 view=view
             )
+            logger.debug(f"No support ticket view - creating a new one.")
 
 
         # Attempt to reattach views for any pending verification requests
@@ -192,9 +210,11 @@ class SupportTicketCog(commands.Cog):
             # Finally, attach the view to the original message
             self.bot.add_view(view, message_id=message_id)
 
+            logger.debug(f"Reattached to existing verification view: {message_id}.")
+
             # Optional: fetch the message and forcibly re-edit it with the updated label
             # so the new label is visible. Some older clients need a forced re-edit:
-            verif_log_channel = self.bot.get_channel(self.verification_channel_id)
+            verif_log_channel = self.bot.get_channel(self.staff_verification_channel_id)
             if verif_log_channel:
                 try:
                     msg = await verif_log_channel.fetch_message(message_id)
@@ -264,7 +284,7 @@ class SupportTicketCog(commands.Cog):
         )
 
         # 4) Send an embed + Staff mention in the Verification Logs channel
-        verif_log_channel = self.bot.get_channel(self.verification_channel_id)
+        verif_log_channel = self.bot.get_channel(self.staff_verification_channel_id)
         if not verif_log_channel:
             logger.warning("Cannot find the verification logs channel.")
             return thread
@@ -374,7 +394,7 @@ class SupportTicketCog(commands.Cog):
 
         # 4) Update the embed color in the verification logs to green
         #    This requires that we kept track of the original message ID, or we search for it.
-        verif_log_channel = self.bot.get_channel(self.verification_channel_id)
+        verif_log_channel = self.bot.get_channel(self.staff_verification_channel_id)
         if not verif_log_channel:
             return
 
@@ -441,7 +461,7 @@ class SupportTicketCog(commands.Cog):
             if thread_to_delete:
                 await thread_to_delete.delete()
         # 5) Update the embed color in the verification logs to red & show justification
-        verif_log_channel = self.bot.get_channel(self.verification_channel_id)
+        verif_log_channel = self.bot.get_channel(self.staff_verification_channel_id)
         if not verif_log_channel:
             return
 

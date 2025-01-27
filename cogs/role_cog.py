@@ -146,7 +146,7 @@ KINKS_EDGE_EXTREME = [
 
 ADVANCED_KINK_VALUES = {
     "abduction", "amputation", "blood play", "body modification", "cnc",
-    "extreme/edge play", "guns", "knives", "needles", "forced intox", "fire"
+    "extreme/edge play", "guns", "knives", "needles", "forced intox", "fire", "TPE"
 }
 
 ##############################################################################
