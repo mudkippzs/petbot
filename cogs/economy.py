@@ -1,353 +1,467 @@
 import discord
-from discord.ext import commands, tasks
-from discord.commands import SlashCommandGroup
-from discord import Option, Interaction
+from discord.ext import commands
+from discord.commands import SlashCommandGroup, Option
+import hashlib
 from loguru import logger
-from typing import TYPE_CHECKING, Optional, Any, Dict, List
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from main import MoguMoguBot
 
-class EconomyCog(commands.Cog):
+class Economy(commands.Cog):
     """
-    Cog to handle economy operations such as tipping, transfers, and staff approvals.
-    Supports predefined tip options from config and handles economy modes:
-    - open: transactions happen instantly if user has funds
-    - moderated: transactions above a certain amount (e.g. >1000) need staff approval
-    - strict: all transactions require staff approval
+    A production-ready economy system with concurrency-safe wallet updates, 
+    transaction ledger with blockchain-like hashing, tip reactions, 
+    and now posting logs to a 'blockchain' channel on each transaction.
     """
 
-    economy_group = SlashCommandGroup("economy", "Commands to interact with the economy.")
-    staff_economy_group = SlashCommandGroup("staff_economy", "Staff commands to interact with the economy.")
+    economy_group = SlashCommandGroup("economy", "Check and transfer credits.")
 
     def __init__(self, bot: "MoguMoguBot"):
         self.bot = bot
+        self._wallets_checked = False
 
-    async def get_economy_mode(self) -> str:
-        row = await self.bot.db.fetchrow("SELECT value FROM server_config WHERE key='economy_mode';")
-        if not row:
-            return "open"
-        return row["value"].get("mode", "open")
+        # Load tip config from config.json
+        self.tip_map = {}
+        tip_options = self.bot.config.get("tip_options", [])
+        for option in tip_options:
+            self.tip_map[option["emoji"]] = option["amount"]
 
-    async def set_economy_mode(self, mode: str):
-        await self.bot.db.execute(
-            "INSERT INTO server_config (key, value) VALUES ('economy_mode', $1) ON CONFLICT (key) DO UPDATE SET value=$1;",
-            {"mode": mode}
+        # The channel for transaction logs. 
+        # Example config key: "blockchain_transaction_channel_id": 1234567890123456
+        self.blockchain_channel_id = self.bot.config.get("blockchain_transaction_channel_id", None)
+
+    # ----------------------------------------------------------------------
+    # LISTENERS
+    # ----------------------------------------------------------------------
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        """Ensure wallets for all existing members (runs only once)."""
+        if self._wallets_checked:
+            return
+        self._wallets_checked = True
+
+        total_created = 0
+        for guild in self.bot.guilds:
+            for member in guild.members:
+                if not member.bot:
+                    if await self.ensure_wallet_exists(member.id):
+                        total_created += 1
+
+        logger.info(f"[Economy] Completed wallet checks. Created {total_created} new wallets.")
+
+    @commands.Cog.listener()
+    async def on_member_join(self, member: discord.Member):
+        """Create wallet for new members on join."""
+        if member.bot:
+            return
+        if await self.ensure_wallet_exists(member.id):
+            logger.info(f"[Economy] Created wallet for new member {member.id} ({member.display_name}).")
+
+    @commands.Cog.listener()
+    async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
+        """
+        If a user reacts with a recognized tip emoji, do a concurrency-safe tip 
+        from the reactor -> message author, unless they are the same user or a bot.
+        """
+        if payload.user_id == self.bot.user.id:
+            return
+
+        emoji_str = str(payload.emoji)
+        if emoji_str not in self.tip_map:
+            return
+
+        guild = self.bot.get_guild(payload.guild_id)
+        if not guild:
+            return
+
+        channel = guild.get_channel(payload.channel_id)
+        if not channel or not isinstance(channel, (discord.TextChannel, discord.Thread)):
+            return
+
+        try:
+            message = await channel.fetch_message(payload.message_id)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            return
+
+        # skip if the same user or msg author is a bot
+        if message.author.bot or message.author.id == payload.user_id:
+            return
+
+        tip_amount = self.tip_map[emoji_str]
+        tipper_id = payload.user_id
+        tippee_id = message.author.id
+
+        success = await self.handle_tip_add(tipper_id, tippee_id, message, emoji_str, tip_amount)
+        if not success:
+            # remove the reaction if tip fails
+            tipper_member = guild.get_member(tipper_id)
+            if tipper_member:
+                try:
+                    await message.remove_reaction(payload.emoji, tipper_member)
+                except discord.HTTPException:
+                    pass
+
+    @commands.Cog.listener()
+    async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent):
+        """
+        If user removes a tip reaction, we attempt a concurrency-safe 'refund' 
+        from the message author -> the user, if that tip was recorded.
+        """
+        if payload.user_id == self.bot.user.id:
+            return
+
+        emoji_str = str(payload.emoji)
+        if emoji_str not in self.tip_map:
+            return
+
+        guild = self.bot.get_guild(payload.guild_id)
+        if not guild:
+            return
+
+        channel = guild.get_channel(payload.channel_id)
+        if not channel or not isinstance(channel, (discord.TextChannel, discord.Thread)):
+            return
+
+        try:
+            message = await channel.fetch_message(payload.message_id)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            return
+
+        if message.author.bot or message.author.id == payload.user_id:
+            return
+
+        tip_amount = self.tip_map[emoji_str]
+        tipper_id = payload.user_id
+        tippee_id = message.author.id
+
+        await self.handle_tip_remove(tipper_id, tippee_id, message, emoji_str, tip_amount)
+
+    # ----------------------------------------------------------------------
+    # TIP HELPERS
+    # ----------------------------------------------------------------------
+
+    async def handle_tip_add(self, tipper_id: int, tippee_id: int,
+                             message: discord.Message,
+                             emoji_str: str, tip_amount: int) -> bool:
+        """
+        concurrency-safe tip from tipper->tippee. 
+        Insert row in reaction_tips to track it for refunds on reaction remove.
+        """
+        # check if tip already recorded
+        logger.debug(f"[DEBUG] Tip triggered: {tipper_id} - {tipper_id} - {message} - {emoji_str} - {tip_amount}")
+        row = await self.bot.db.fetchrow(
+            """
+            SELECT 1 FROM reaction_tips
+             WHERE tipper_id=$1 AND message_id=$2 AND emoji=$3
+            """,
+            tipper_id, message.id, emoji_str
+        )
+        if row:
+            # user already tipped
+            return False
+
+        # do the concurrency-safe transfer
+        success = await self.transfer_balance(
+            sender_id=tipper_id,
+            recipient_id=tippee_id,
+            amount=tip_amount,
+            justification=f"Tip {emoji_str} on msg {message.id}"
         )
 
-    async def sub_exists(self, sub_id: int) -> bool:
-        row = await self.bot.db.fetchrow("SELECT id FROM subs WHERE id=$1;", sub_id)
-        return row is not None
+        logger.debug(f"[DEBUG] {sender_id} - {recipient_id} - {amount} - {justification}")
+        if not success:
+            return False
 
-    async def user_exists(self, user_id: int) -> bool:
-        w = await self.bot.db.fetchrow("SELECT balance FROM wallets WHERE user_id=$1;", user_id)
-        if not w:
-            await self.bot.db.execute("INSERT INTO wallets (user_id, balance) VALUES ($1,0) ON CONFLICT DO NOTHING;", user_id)
+        # record in reaction_tips
+        await self.bot.db.execute(
+            """
+            INSERT INTO reaction_tips (tipper_id, message_id, emoji, tip_amount, tippee_id)
+            VALUES ($1, $2, $3, $4, $5)
+            """,
+            tipper_id, message.id, emoji_str, tip_amount, tippee_id
+        )
         return True
 
-    async def user_balance(self, user_id: int) -> int:
-        row = await self.bot.db.fetchrow("SELECT balance FROM wallets WHERE user_id=$1;", user_id)
-        if row:
-            return row["balance"]
-        await self.bot.db.execute("INSERT INTO wallets (user_id, balance) VALUES ($1,0);", user_id)
-        return 0
-
-    async def create_transaction(self, sender_id: int, recipient_id: Optional[int], amount: int, justification: str, status: str) -> int:
+    async def handle_tip_remove(self, tipper_id: int, tippee_id: int,
+                                message: discord.Message,
+                                emoji_str: str, tip_amount: int):
+        """
+        concurrency-safe 'refund' from tippee->tipper if row found in reaction_tips.
+        """
         row = await self.bot.db.fetchrow(
-            "INSERT INTO transactions (sender_id, recipient_id, amount, justification, status) VALUES ($1,$2,$3,$4,$5) RETURNING id;",
-            sender_id, recipient_id, amount, justification, status
+            """
+            SELECT 1 FROM reaction_tips
+             WHERE tipper_id=$1 AND message_id=$2 AND emoji=$3
+            """,
+            tipper_id, message.id, emoji_str
         )
-        return row["id"]
+        if not row:
+            return
 
-    async def distribute_to_sub_owners(self, sub_id: int, amount: int):
-        owners = await self.bot.db.fetch("SELECT user_id, percentage FROM sub_ownership WHERE sub_id=$1;", sub_id)
-        for o in owners:
-            share = int((o["percentage"] / 100) * amount)
-            await self.bot.db.execute("UPDATE wallets SET balance=balance+$1 WHERE user_id=$2;", share, o["user_id"])
-
-    async def approve_transaction(self, tx_id: int):
-        tx = await self.bot.db.fetchrow("SELECT * FROM transactions WHERE id=$1;", tx_id)
-        if not tx or tx["status"] != "pending":
-            return False, "Transaction not found or not pending."
-
-        sender_id = tx["sender_id"]
-        recipient_id = tx["recipient_id"]
-        amount = tx["amount"]
-        justification = tx["justification"]
-
-        # Check sender balance again before approval
-        sender_balance = await self.user_balance(sender_id)
-        if sender_balance < amount:
-            return False, "Sender no longer has enough funds."
-
-        if justification.startswith("sub:"):
-            # Tip to sub owners
-            sub_id = int(justification.split(':',1)[1])
-            await self.bot.db.execute("UPDATE wallets SET balance=balance-$1 WHERE user_id=$2;", amount, sender_id)
-            await self.distribute_to_sub_owners(sub_id, amount)
+        refund_ok = await self.transfer_balance(
+            sender_id=tippee_id,
+            recipient_id=tipper_id,
+            amount=tip_amount,
+            justification=f"Refund tip {emoji_str} on msg {message.id}"
+        )
+        if refund_ok:
+            await self.bot.db.execute(
+                """
+                DELETE FROM reaction_tips
+                 WHERE tipper_id=$1 AND message_id=$2 AND emoji=$3
+                """,
+                tipper_id, message.id, emoji_str
+            )
         else:
-            # User-to-user transfer
-            await self.bot.db.execute("UPDATE wallets SET balance=balance-$1 WHERE user_id=$2;", amount, sender_id)
-            if recipient_id is not None:
-                await self.bot.db.execute("UPDATE wallets SET balance=balance+$1 WHERE user_id=$2;", amount, recipient_id)
+            # The tippee might not have enough funds to refund
+            logger.warning(
+                f"[Economy] Could not refund tip removal for user {tipper_id} on msg {message.id}. "
+                f"Tippee {tippee_id} might have spent the funds."
+            )
 
-        await self.bot.db.execute("UPDATE transactions SET status='completed' WHERE id=$1;", tx_id)
-        return True, "Transaction approved and completed."
+    # ----------------------------------------------------------------------
+    # WALLET/DB
+    # ----------------------------------------------------------------------
 
-    async def deny_transaction(self, tx_id: int):
-        tx = await self.bot.db.fetchrow("SELECT * FROM transactions WHERE id=$1;", tx_id)
-        if not tx or tx["status"] != "pending":
-            return False, "Transaction not found or not pending."
-        await self.bot.db.execute("UPDATE transactions SET status='denied' WHERE id=$1;", tx_id)
-        return True, "Transaction denied."
-
-    def needs_approval(self, economy_mode: str, amount: int) -> bool:
-        if economy_mode == "open":
+    async def ensure_wallet_exists(self, user_id: int) -> bool:
+        row = await self.bot.db.fetchrow(
+            "SELECT user_id FROM wallets WHERE user_id=$1;", user_id
+        )
+        if row:
             return False
-        elif economy_mode == "moderated":
-            return amount > 1000
-        elif economy_mode == "strict":
-            return True
-        return False
-
-    @economy_group.command(name="economy_info", description="Learn about the current economy mode and rules.")
-    async def economy_info(self, ctx: discord.ApplicationContext):
-        await ctx.defer(ephemeral=True)
-        if ctx.guild is None:
-            await ctx.followup.send("This command can only be used in a server.")
-            return
-
-        mode = await self.get_economy_mode()
-        msg = (
-            f"**Current Economy Mode:** {mode}\n\n"
-            "**Mode Details:**\n"
-            "- **open:** All transactions are instant if you have sufficient funds.\n"
-            "- **moderated:** Transactions above a certain threshold (e.g. 1000) require staff approval.\n"
-            "- **strict:** All transactions require staff approval.\n\n"
-            "If your transaction is pending, it means staff needs to approve it before completion."
+        await self.bot.db.execute(
+            "INSERT INTO wallets (user_id, balance) VALUES ($1, 0);",
+            user_id
         )
-        await ctx.followup.send(msg)
+        return True
 
-    @economy_group.command(name="tip", description="Tip a user or sub. Use 'sub:<id>' to tip a sub.")
-    async def tip_cmd(self,
-                      ctx: discord.ApplicationContext,
-                      recipient: Option(str, "User mention or 'sub:<id>'"),
-                      amount: Option(int, "Amount to tip, or leave empty to choose from predefined options", required=False)):
-        await ctx.defer(ephemeral=True)
-        if ctx.guild is None:
-            await ctx.followup.send("This command can only be used in a server.")
-            return
+    async def get_balance(self, user_id: int) -> int:
+        await self.ensure_wallet_exists(user_id)
+        row = await self.bot.db.fetchrow(
+            "SELECT balance FROM wallets WHERE user_id=$1;",
+            user_id
+        )
+        if not row:
+            return 0
+        return row["balance"]
 
-        # Parse recipient
-        if recipient.startswith("sub:"):
-            try:
-                sub_id = int(recipient.split(':', 1)[1])
-            except ValueError:
-                await ctx.followup.send("Invalid sub syntax. Use 'sub:<id>'.")
-                return
-            if not await self.sub_exists(sub_id):
-                await ctx.followup.send("Sub not found.")
-                return
-            justification = f"sub:{sub_id}"
-            recipient_id = None
-        else:
-            # User recipient
-            user_id = None
-            if recipient.isdigit():
-                user_id = int(recipient)
-            else:
-                if recipient.startswith("<@") and recipient.endswith(">"):
-                    inner = recipient.strip("<@>")
-                    if inner.isdigit():
-                        user_id = int(inner)
-            if user_id is None:
-                await ctx.followup.send("Invalid recipient. Use a mention or 'sub:<id>'.")
-                return
-            await self.user_exists(user_id)
-            justification = "user_transfer"
-            recipient_id = user_id
-            if recipient_id == ctx.author.id:
-                await ctx.followup.send("You cannot tip yourself.")
-                return
+    async def add_balance(self, user_id: int, amount: int, reason: str = "") -> bool:
+        if amount < 0:
+            logger.error(f"[Economy] add_balance called with negative amount: {amount}")
+            return False
 
-        economy_mode = await self.get_economy_mode()
-        sender_id = ctx.author.id
+        await self.ensure_wallet_exists(user_id)
+        try:
+            await self.bot.db.execute(
+                "UPDATE wallets SET balance=balance+$1 WHERE user_id=$2;",
+                amount, user_id
+            )
+            await self.log_transaction(
+                sender_id=0,
+                recipient_id=user_id,
+                amount=amount,
+                justification=reason or "manual add_balance",
+                status="completed"
+            )
+            return True
+        except Exception as e:
+            logger.exception(f"[Economy] Failed to add balance for {user_id}: {e}")
+            return False
 
-        if amount is not None:
-            # User specified amount directly
-            if amount <= 0:
-                await ctx.followup.send("Amount must be greater than 0.")
-                return
-            sender_balance = await self.user_balance(sender_id)
-            if economy_mode == "open" and sender_balance < amount:
-                await ctx.followup.send("You don't have enough balance.")
-                return
+    async def deduct_balance(self, user_id: int, amount: int, reason: str = "") -> bool:
+        if amount < 0:
+            logger.error(f"[Economy] deduct_balance called with negative: {amount}")
+            return False
+        await self.ensure_wallet_exists(user_id)
+        try:
+            result = await self.bot.db.execute(
+                """
+                UPDATE wallets
+                   SET balance=balance-$1
+                 WHERE user_id=$2
+                   AND balance >= $1
+                """,
+                amount,
+                user_id
+            )
+            if "UPDATE 1" not in result:
+                return False
+            await self.log_transaction(
+                sender_id=user_id,
+                recipient_id=0,
+                amount=amount,
+                justification=reason or "manual deduct_balance",
+                status="completed"
+            )
+            return True
+        except Exception as e:
+            logger.exception(f"[Economy] Failed to deduct balance for {user_id}: {e}")
+            return False
 
-            if self.needs_approval(economy_mode, amount):
-                # create pending tx
-                tx_id = await self.create_transaction(sender_id, recipient_id, amount, justification, "pending")
-                await ctx.followup.send(
-                    f"Transaction created and is pending staff approval (Amount: {amount}, TX: {tx_id})."
-                )
-            else:
-                if sender_balance < amount:
-                    await ctx.followup.send("You don't have enough balance.")
-                    return
-                # Deduct/add funds immediately
-                if recipient_id is None:
-                    # Tipping a sub
-                    await self.bot.db.execute("UPDATE wallets SET balance=balance-$1 WHERE user_id=$2;", amount, sender_id)
-                    await self.distribute_to_sub_owners(sub_id, amount)
-                    tx_id = await self.create_transaction(sender_id, recipient_id, amount, justification, "completed")
-                    await ctx.followup.send(f"Tip of {amount} sent to sub {sub_id} owners! (TX: {tx_id})")
-                else:
-                    # User to user
-                    await self.bot.db.execute("UPDATE wallets SET balance=balance-$1 WHERE user_id=$2;", amount, sender_id)
-                    await self.bot.db.execute("UPDATE wallets SET balance=balance+$1 WHERE user_id=$2;", amount, recipient_id)
-                    tx_id = await self.create_transaction(sender_id, recipient_id, amount, justification, "completed")
-                    await ctx.followup.send(f"Tip of {amount} sent to <@{recipient_id}>! (TX: {tx_id})")
-        else:
-            # No amount specified, show predefined tip options
-            tip_options = self.bot.config.get("tip_options", [])
-            if not tip_options:
-                await ctx.followup.send("No predefined tip options are configured.")
-                return
-
-            class TipButton(discord.ui.Button):
-                def __init__(self, label: str, amount: int, recipient_id: Optional[int], justification: str, emoji: Optional[str]):
-                    super().__init__(style=discord.ButtonStyle.primary, label=f"{amount}", emoji=emoji)
-                    self.amount = amount
-                    self.recipient_id = recipient_id
-                    self.justification = justification
-
-                async def callback(self, interaction: Interaction):
-                    # Process transaction on button press
-                    sender_id_local = interaction.user.id
-                    economy_mode_local = await interaction.client.get_cog("EconomyCog").get_economy_mode()
-                    sender_balance_local = await interaction.client.get_cog("EconomyCog").user_balance(sender_id_local)
-
-                    if economy_mode_local == "open" and sender_balance_local < self.amount:
-                        await interaction.response.edit_message(content="You don't have enough balance.", view=None)
-                        return
-
-                    cog = interaction.client.get_cog("EconomyCog")
-                    if cog.needs_approval(economy_mode_local, self.amount):
-                        tx_id_local = await cog.create_transaction(sender_id_local, self.recipient_id, self.amount, self.justification, "pending")
-                        await interaction.response.edit_message(
-                            content=f"Transaction pending approval (Amount: {self.amount}, TX: {tx_id_local}).",
-                            view=None
-                        )
-                    else:
-                        # immediate
-                        if sender_balance_local < self.amount:
-                            await interaction.response.edit_message(content="You don't have enough balance.", view=None)
-                            return
-                        if self.justification.startswith("sub:"):
-                            sub_id_local = int(self.justification.split(':',1)[1])
-                            await cog.bot.db.execute("UPDATE wallets SET balance=balance-$1 WHERE user_id=$2;", self.amount, sender_id_local)
-                            await cog.distribute_to_sub_owners(sub_id_local, self.amount)
-                            tx_id_local = await cog.create_transaction(sender_id_local, None, self.amount, self.justification, "completed")
-                            await interaction.response.edit_message(
-                                content=f"Tip of {self.amount} sent to sub {sub_id_local} owners! (TX: {tx_id_local})",
-                                view=None
-                            )
-                        else:
-                            await cog.bot.db.execute("UPDATE wallets SET balance=balance-$1 WHERE user_id=$2;", self.amount, sender_id_local)
-                            await cog.bot.db.execute("UPDATE wallets SET balance=balance+$1 WHERE user_id=$2;", self.amount, self.recipient_id)
-                            tx_id_local = await cog.create_transaction(sender_id_local, self.recipient_id, self.amount, self.justification, "completed")
-                            await interaction.response.edit_message(
-                                content=f"Tip of {self.amount} sent! (TX: {tx_id_local})",
-                                view=None
-                            )
-
-            view = discord.ui.View()
-            for opt in tip_options:
-                emoji = opt.get("emoji", None)
-                amt = opt.get("amount", 0)
-                if amt > 0:
-                    view.add_item(TipButton(label=str(amt), amount=amt, recipient_id=recipient_id, justification=justification, emoji=emoji))
-
-            await ctx.followup.send("Choose a tip amount:", view=view)
-
-    @economy_group.command(name="transfer", description="Transfer funds to another user.")
-    @commands.has_any_role("Gentleman", "Harlot", "Boss", "Underboss", "Consigliere")
-    async def transfer_cmd(self, ctx: discord.ApplicationContext, user: discord.User, amount: int):
-        await ctx.defer(ephemeral=True)
-        if ctx.guild is None:
-            await ctx.followup.send("This command can only be used in a server.")
-            return
-
+    async def transfer_balance(
+        self,
+        sender_id: int,
+        recipient_id: int,
+        amount: int,
+        justification: str = ""
+    ) -> bool:
         if amount <= 0:
-            await ctx.followup.send("Amount must be greater than 0.")
-            return
+            logger.error(f"[Economy] transfer_balance called with non-positive: {amount}")
+            return False
 
-        sender_id = ctx.author.id
-        recipient_id = user.id
-        if recipient_id == sender_id:
-            await ctx.followup.send("You cannot transfer to yourself.")
-            return
+        await self.ensure_wallet_exists(sender_id)
+        await self.ensure_wallet_exists(recipient_id)
 
-        economy_mode = await self.get_economy_mode()
-        sender_balance = await self.user_balance(sender_id)
-        if economy_mode == "open" and sender_balance < amount:
-            await ctx.followup.send("You don't have enough balance.")
-            return
+        # concurrency safe transaction
+        async with self.bot.db.pool.acquire() as conn:
+            async with conn.transaction():
+                deduct_result = await conn.execute(
+                    """
+                    UPDATE wallets
+                       SET balance=balance-$1
+                     WHERE user_id=$2
+                       AND balance >= $1
+                    """,
+                    amount,
+                    sender_id
+                )
+                if "UPDATE 1" not in deduct_result:
+                    return False
 
-        justification = "user_transfer"
-        if self.needs_approval(economy_mode, amount):
-            tx_id = await self.create_transaction(sender_id, recipient_id, amount, justification, "pending")
-            await ctx.followup.send(f"Transfer pending staff approval (Amount: {amount}, TX: {tx_id}).")
-        else:
-            if sender_balance < amount:
-                await ctx.followup.send("You don't have enough balance.")
-                return
-            await self.bot.db.execute("UPDATE wallets SET balance=balance-$1 WHERE user_id=$2;", amount, sender_id)
-            await self.bot.db.execute("UPDATE wallets SET balance=balance+$1 WHERE user_id=$2;", amount, recipient_id)
-            tx_id = await self.create_transaction(sender_id, recipient_id, amount, justification, "completed")
-            await ctx.followup.send(f"Transfer of {amount} to <@{recipient_id}> completed! (TX: {tx_id})")
+                # add to recipient
+                await conn.execute(
+                    "UPDATE wallets SET balance=balance+$1 WHERE user_id=$2;",
+                    amount,
+                    recipient_id
+                )
 
-    @staff_economy_group.command(name="approve_transaction", description="Approve a pending transaction.")
-    @commands.has_any_role("Boss", "Underboss", "Consigliere")
-    async def staff_approve(self, ctx: discord.ApplicationContext, tx_id: int):
+        await self.log_transaction(
+            sender_id=sender_id,
+            recipient_id=recipient_id,
+            amount=amount,
+            justification=justification or "transfer_balance",
+            status="completed"
+        )
+        return True
+
+    # ----------------------------------------------------------------------
+    # LOGGING TRANSACTIONS
+    # ----------------------------------------------------------------------
+
+    async def log_transaction(
+        self,
+        sender_id: int,
+        recipient_id: int,
+        amount: int,
+        justification: str,
+        status: str = "pending"
+    ):
+        """
+        Insert a row in 'transactions', chain the hash, THEN post an embed 
+        to the 'blockchain' channel with the details (like we did in Ownership).
+        """
+        last_tx = await self.bot.db.fetchrow(
+            "SELECT id, hash FROM transactions ORDER BY id DESC LIMIT 1;"
+        )
+        logger.debug(f"[DEBUG] logging txn: {sender_id} - {recipient_id} - {amount} - {justification} - {status}")
+        prev_hash = last_tx["hash"] if last_tx else "0"
+
+        tx_row = await self.bot.db.fetchrow(
+            """
+            INSERT INTO transactions (sender_id, recipient_id, amount, justification, status)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id
+            """,
+            sender_id,
+            recipient_id,
+            amount,
+            justification,
+            status
+        )
+        tx_id = tx_row["id"]
+
+        # Build new hash
+        to_hash = f"{tx_id}{sender_id}{recipient_id}{amount}{justification}{prev_hash}"
+        tx_hash = hashlib.sha256(to_hash.encode()).hexdigest()
+
+        # Update DB
+        await self.bot.db.execute(
+            "UPDATE transactions SET hash=$1 WHERE id=$2;",
+            tx_hash, tx_id
+        )
+
+        logger.info(
+            f"[Economy] Transaction #{tx_id} from {sender_id} -> {recipient_id}, amount={amount}, hash={tx_hash[:8]}..."
+        )
+
+        # 1) Build an embed
+        embed = discord.Embed(
+            title="Transaction Logged",
+            description=(
+                f"**ID:** {tx_id}\n"
+                f"**Sender:** {sender_id if sender_id!=0 else 'System'}\n"
+                f"**Recipient:** {recipient_id if recipient_id!=0 else 'System'}\n"
+                f"**Amount:** {amount}\n"
+                f"**Justification:** {justification}\n"
+                f"**Hash:** `{tx_hash[:16]}...`\n"
+            ),
+            color=discord.Color.green()
+        )
+        embed.set_footer(text="Blockchain-like ledger")
+
+        # 2) Post to the configured blockchain channel if available
+        if self.blockchain_channel_id:
+            channel = self.bot.get_channel(self.blockchain_channel_id)
+            if channel and isinstance(channel, discord.TextChannel):
+                try:
+                    await channel.send(embed=embed)
+                except discord.HTTPException as e:
+                    logger.warning(
+                        f"[Economy] Failed to send transaction #{tx_id} log to channel {channel.id}: {e}"
+                    )
+
+    # ----------------------------------------------------------------------
+    # OPTIONAL: BASIC SLASH COMMANDS
+    # ----------------------------------------------------------------------
+
+    @economy_group.command(name="balance", description="Check your current credit balance.")
+    async def balance_cmd(self, ctx: discord.ApplicationContext):
+        """Let's the user see their current wallet balance (ephemeral)."""
         await ctx.defer(ephemeral=True)
-        if ctx.guild is None:
-            await ctx.followup.send("This command can only be used in a server.")
-            return
+        bal = await self.get_balance(ctx.user.id)
+        await ctx.followup.send(f"Your balance is **{bal}** credits.", ephemeral=True)
 
-        success, message = await self.approve_transaction(tx_id)
-        if success:
-            await ctx.followup.send(f"Transaction {tx_id} approved.")
-            logger.info(f"Staff {ctx.author.id} approved transaction {tx_id}.")
-        else:
-            await ctx.followup.send(f"Failed to approve transaction: {message}")
-
-    @staff_economy_group.command(name="deny_transaction", description="Deny a pending transaction.")
-    @commands.has_any_role("Boss", "Underboss", "Consigliere")
-    async def staff_deny(self, ctx: discord.ApplicationContext, tx_id: int):
+    @economy_group.command(name="transfer", description="Transfer credits to another user.")
+    async def transfer_cmd(
+        self,
+        ctx: discord.ApplicationContext,
+        member: Option(discord.Member, "Recipient"),
+        amount: Option(int, "Amount to transfer", min_value=1)
+    ):
+        """Slash-based ephemeral command for direct user->user transfers."""
         await ctx.defer(ephemeral=True)
-        if ctx.guild is None:
-            await ctx.followup.send("This command can only be used in a server.")
-            return
 
-        success, message = await self.deny_transaction(tx_id)
-        if success:
-            await ctx.followup.send(f"Transaction {tx_id} denied.")
-            logger.info(f"Staff {ctx.author.id} denied transaction {tx_id}.")
+        if member.id == ctx.user.id:
+            return await ctx.followup.send("You can’t transfer to yourself!", ephemeral=True)
+
+        ok = await self.transfer_balance(
+            sender_id=ctx.user.id,
+            recipient_id=member.id,
+            amount=amount,
+            justification="Slash-based user->user transfer"
+        )
+        if ok:
+            await ctx.followup.send(
+                f"Transferred {amount} credits to {member.mention}.",
+                ephemeral=True
+            )
         else:
-            await ctx.followup.send(f"Failed to deny transaction: {message}")
+            await ctx.followup.send(
+                "Transfer failed (possibly insufficient funds).",
+                ephemeral=True
+            )
 
-    @staff_economy_group.command(name="economy_mode", description="Set the server's economy mode.")
-    @commands.has_any_role("Boss")
-    async def config_economy_mode(self, ctx: discord.ApplicationContext,
-                                  mode: Option(str, "Economy mode: open, moderated, strict", choices=["open", "moderated", "strict"])):
-        await ctx.defer(ephemeral=True)
-        if ctx.guild is None:
-            await ctx.followup.send("This command can only be used in a server.")
-            return
-
-        await self.set_economy_mode(mode)
-        await ctx.followup.send(f"Economy mode set to {mode}.")
-        logger.info(f"Economy mode changed to {mode} by staff {ctx.author.id}.")
-
-def setup(bot: "MoguMoguBot"):
-    bot.add_cog(EconomyCog(bot))
+def setup(bot: commands.Bot):
+    bot.add_cog(Economy(bot))

@@ -550,7 +550,7 @@ class VerificationButton(discord.ui.Button):
 # --------------------------
 
 class SupportTicketModal(discord.ui.Modal):
-    """Modal for creating a support ticket."""
+    """Modal for creating a support ticket and alerting staff."""
 
     def __init__(self, bot: commands.Bot):
         super().__init__(title="Create Support Ticket")
@@ -573,47 +573,98 @@ class SupportTicketModal(discord.ui.Modal):
         self.add_item(self.attachments)
 
     async def callback(self, interaction: discord.Interaction):
-        """Creates a support thread after modal submission."""
-        support_channel = self.bot.get_channel(self.bot.config["support_channel_id"])
+        """Creates a support thread, saves to DB, and alerts staff."""
+        # 1) Get the support channel
+        support_channel_id = self.bot.config["support_channel_id"]
+        support_channel = self.bot.get_channel(support_channel_id)
         if not support_channel:
             return await interaction.response.send_message(
-                "Support channel is not configured. Please contact an admin.", ephemeral=True, delete_after=30.0
+                "Support channel is not configured. Please contact an admin.",
+                ephemeral=True,
+                delete_after=30.0
             )
 
-        # Insert the ticket into the database
+        # 2) Create the DB record for the ticket
         ticket_id = await self.bot.db.fetchval(
-            "INSERT INTO tickets (user_id, channel_id) VALUES ($1, $2) RETURNING id",
+            """
+            INSERT INTO tickets (user_id, channel_id)
+            VALUES ($1, $2)
+            RETURNING id
+            """,
             interaction.user.id,
             support_channel.id
         )
 
+        # 3) Create a new private thread
         thread_name = f"ticket-{interaction.user.display_name}-#{ticket_id}"
         thread = await support_channel.create_thread(
             name=thread_name,
             type=discord.ChannelType.private_thread
         )
+
+        # 4) Add the user to the thread
         await thread.add_user(interaction.user)
 
-        # Add the opener as a participant
+        # 5) Insert the opener as participant in DB
         await self.bot.db.execute(
-            "INSERT INTO ticket_participants (ticket_id, user_id) VALUES ($1, $2)",
+            """
+            INSERT INTO ticket_participants (ticket_id, user_id)
+            VALUES ($1, $2)
+            """,
             ticket_id,
             interaction.user.id
         )
 
+        # 6) Send initial message in the thread summarizing the ticket
         await thread.send(
             content=(
-                f"**Ticket #{ticket_id} Opened by {interaction.user.mention}**\n\n"
+                f"**Ticket #{ticket_id} opened by {interaction.user.mention}**\n\n"
                 f"**Issue Description:** {self.issue_description.value}\n"
                 f"**Attachments:** {self.attachments.value if self.attachments.value else 'None'}"
             )
         )
 
+        # 7) Acknowledge the user
         await interaction.response.send_message(
             f"Your ticket has been created: {thread.mention}. Staff will assist you soon.",
             ephemeral=True,
             delete_after=30.0
         )
+
+        # 8) Now alert staff in a designated staff channel
+        staff_channel_id = self.bot.config.get("staff_ticket_channel_id")
+        staff_channel = self.bot.get_channel(staff_channel_id)
+        if not staff_channel:
+            # If no staff channel is configured/found, just log or skip
+            return
+
+        staff_role_names = self.bot.config.get("staff_roles", [])
+        staff_mentions = []
+
+        for role_name in staff_role_names:
+            role = get(interaction.guild.roles, name=role_name)
+            if role:
+                staff_mentions.append(role.mention)
+
+        mention_str = " ".join(staff_mentions) if staff_mentions else ""
+
+        # Create an embed with ticket details
+        embed = discord.Embed(
+            title=f"New Support Ticket #{ticket_id}",
+            description=(
+                f"**User:** {interaction.user.mention}\n"
+                f"**Thread:** [Jump to Thread]({thread.jump_url})\n\n"
+                f"**Issue Description:**\n{self.issue_description.value}\n\n"
+                f"**Attachments:** {self.attachments.value if self.attachments.value else 'None'}"
+            ),
+            color=discord.Color.blurple(),
+            timestamp=datetime.datetime.utcnow()
+        )
+        embed.set_footer(text=f"User ID: {interaction.user.id} • Ticket ID: {ticket_id}")
+
+        # Finally, send in staff channel, optionally mentioning roles
+        await staff_channel.send(content=mention_str, embed=embed)
+
 
 
 # --------------------------

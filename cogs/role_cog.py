@@ -411,7 +411,7 @@ class RolesFlowView(discord.ui.View):
     # Finish Flow: upsert DB + remove/add Discord roles
     # ─────────────────────────────────────────────────────────────────────
     async def finish_flow(self, interaction: discord.Interaction):
-        logger.debug("[finish_flow] Starting for user=%s", self.user.id)
+        logger.debug("[finish_flow] Starting for user=%s", interaction.user.display_name)
         await interaction.response.defer(ephemeral=True)
 
         new = self.new_data

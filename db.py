@@ -197,8 +197,6 @@ class Database:
                 global_cooldown_until TIMESTAMP
             );
             """,
-
-            # Add open_dm_perms table
             """
             CREATE TABLE IF NOT EXISTS open_dm_perms (
                 user1_id BIGINT NOT NULL,
@@ -207,13 +205,12 @@ class Database:
                 CHECK (user1_id < user2_id)  -- Enforce user1_id is always less than user2_id
             );
             """,
-
-            # Tables with foreign key dependencies
             """
             CREATE TABLE IF NOT EXISTS sub_ownership (
                 sub_id BIGINT NOT NULL,
                 user_id BIGINT,
                 percentage INT,
+                acquired_at TIMESTAMP DEFAULT NOW(),
                 PRIMARY KEY (sub_id, user_id)
             );
             """,
@@ -339,6 +336,7 @@ class Database:
                 message_id BIGINT PRIMARY KEY,
                 user_id BIGINT,
                 target_user_id BIGINT,
+                expires_at TIMESTAMP DEFAULT NOW(),
                 active BOOLEAN DEFAULT TRUE
             );
             """,
@@ -401,6 +399,16 @@ class Database:
                 joined_at TIMESTAMP DEFAULT NOW(),
                 PRIMARY KEY (ticket_id, user_id)
             );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS reaction_tips (
+              tipper_id BIGINT NOT NULL,
+              message_id BIGINT NOT NULL,
+              emoji TEXT NOT NULL,
+              tip_amount INT NOT NULL,
+              tippee_id BIGINT NOT NULL,
+              PRIMARY KEY (tipper_id, message_id, emoji)
+            );
             """
         ]
 
@@ -411,7 +419,11 @@ class Database:
 
         async with self.pool.acquire() as conn:
             for statement in create_statements:
-                await conn.execute(statement)
+                try:
+                    await conn.execute(statement)
+                except asyncpg.exceptions.PostgresSyntaxError as e:
+                    logger.exception(e)
+
 
         logger.info("All tables ensured (created if missing, altered if needed).")
 
