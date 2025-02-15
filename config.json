@@ -1,0 +1,65 @@
+{
+    "token": "CLIENT_TOKEN_HERE",
+    "ask_to_dm_channel_id": 1317896017651433546,
+    "blockchain_transaction_channel_id": 1330873604358930442,
+    "dm_request_cooldown": 1,
+    "economy_mode": "open",
+    "voice_chat_category_id": 1317896017651433547,
+    "guild_id": 1317896016707453099,
+    "mag_react_cooldown": 1,
+    "membership_minimum_seconds": 60,
+    "muted_role_id": 1330291524658921482,
+    "owner_role_id": 1317896016963571712,
+    "ownership_cooldown_days": 7,
+    "ownership_require_staff_approval": false,
+    "role_select_channel_id": 1317896017651433545,
+    "role_select_message_id": 1330608843377475614,
+    "rules_channel_id": 1317896017458368536,
+    "rules_message_id": 1333114979917893703,
+    "rules_unverified_role_id": 1317896016963571717,
+    "rules_verified_role_id": 1317896016942596145,
+    "support_channel_id": 1335642856320401579,
+    "staff_channel_ownership_id": 1330498809590976594,
+    "staff_channel_rules_log_id": 1330928244383416370,
+    "staff_role_id": 1317896016963571716,
+    "sub_role_id": 1317896016942596146,
+    "suport_ticklet_inactivity_limit": 48,
+    "support_channel_id": 1317896017458368537,
+    "support_ticket_transcripts_enabled": true,
+    "staff_verification_channel_id": 1331573988584853524,
+    "verification_kick_on_rejection": true,
+    "db_creds": {
+        "dbname": "petbot_db_test",
+        "user": "petbot_db_user",
+        "pass": "SuperS3cr3tP455W0rD",
+        "host": "127.0.0.1"
+    },
+    "staff_roles": [
+        "Owner",
+        "Boss",
+        "Consigliere",
+        "Underboss",
+        "The Company"
+    ],
+    "backup": {
+        "interval_minutes": 15,
+        "staff_channel_id": 1329557567755780268,
+        "backup_recipients": [
+            1279470649168892077
+        ]
+    },
+    "tip_options": [
+        {
+            "emoji": "🪙",
+            "amount": 10
+        },
+        {
+            "emoji": "💵",
+            "amount": 50
+        },
+        {
+            "emoji": "💰",
+            "amount": 100
+        }
+    ]
+}
