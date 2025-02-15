@@ -1,249 +1,435 @@
-Below is a comprehensive blueprint that outlines the entire bot's design, architecture, features, and implementation details. This document is intended as a master reference before and during development. It reflects all previously discussed ideas, including asynchronous operations, flexible economy modes, auctions, ownership structure, service menus, reputation, server management, and a robust backup system.
+# MoguMoguBot - Handover & Documentation
+
+Welcome to the **MoguMoguBot** codebase. This repository manages a production-ready Discord bot with multiple features:
+
+- **Ownership** system (claiming “subs/pets”)
+- **Economy** with tipping and credit transactions
+- **Moderation** (ban, kick, mute, etc.)
+- **Contract & Escrow** logic for auctions and service agreements
+- **Support Ticket** system
+- **Role selection** flows for server members
+- **Backup** and database management
+- **Verification** flow
+
+Below is a comprehensive overview of each file, the classes and functions within, unfinished work, a checklist for completion, and known bugs or issues.
 
 ---
 
-## High-Level Overview
-
-**Goal:** Build a versatile Discord bot that supports a fun “sub ownership” economy. It manages auctions, multi-owner weighted ownership of subs, subscriptions, escrow contracts, services, tipping, and events, all configurable by staff with strict or lenient modes. It also features periodic database backups, theming, logging, and a well-structured codebase.
-
-**Key Principles:**
-- **Asynchronous Everywhere:** Use `async/await` for all I/O, including database operations, HTTP requests, file reads/writes, and Discord API interactions.  
-- **Modular Cogs & Separation of Concerns:** Each major feature is a separate cog. Cogs communicate through shared references (e.g., `bot.db`, `bot.config`).  
-- **Configurable & Extensible:** Feature toggles, economy modes, roles/permissions, theming, and backup recipients are all defined in JSON config files, allowing easy changes without code modifications.  
-- **User-Friendly & Polished:** Slash commands, intuitive embed UIs, brandable themes (color, emojis), and responsive error handling to provide a professional feel.  
-- **Performance & Scalability:** Using `asyncpg` for efficient DB operations, possibly caching frequently accessed data, and carefully handling concurrency.  
-- **Data Backup & Reliability:** A periodic backup task ensures the database is regularly saved offsite and delivered to staff members.
-
----
-
-## Features & Cogs
-
-### 1. **Ownership & Sub Cog**
-- **Purpose:** Manage subs, their owners, subscribers, and service menus.
-- **Key Features:**
-  - **Subs:** Each sub has a unique ID, name, optional description, and associated owners.
-  - **Multi-Owner Weighted Shares:** One primary owner controls the distribution of ownership percentages to other owners or investors.
-  - **Subscribers:** Users who pay into the sub’s pot regularly instead of receiving dividends. This creates a recurring income stream for the owners.
-  - **Service Menus:** A sub can have a list of services (e.g., voice performance, custom images) with set prices. Owners with permission can add, edit, or remove these entries.
-- **Commands:**
-  - `/sub create <name>`: Create a new sub.
-  - `/sub info <sub_id>`: Display sub ownership, subscribers, services, and profile.
-  - `/sub ownership add <sub_id> <@user> <percentage>`: Add an owner.
-  - `/sub ownership remove <sub_id> <@user>`: Remove an owner.
-  - `/sub subscriber add <sub_id> <@user>`: Add a subscriber.
-  - `/sub subscriber remove <sub_id> <@user>`: Remove a subscriber.
-  - `/service add <sub_id> <name> <price> <description>`: Add a service.
-  - `/service remove <sub_id> <service_id>`: Remove a service.
-- **Database Tables:**
-  - `subs(id SERIAL, name TEXT, description TEXT, primary_owner_id BIGINT, ... )`
-  - `sub_ownership(sub_id INT, user_id BIGINT, percentage INT)`
-  - `sub_subscribers(sub_id INT, user_id BIGINT, next_payment_due TIMESTAMP)`
-  - `sub_services(id SERIAL, sub_id INT, name TEXT, price INT, description TEXT)`
-
-### 2. **Auction & Marketplace Cog**
-- **Purpose:** Auctions for sub ownership, services, or other custom offerings.
-- **Key Features:**
-  - **Auction Types:** Full ownership transfer, partial ownership, leasing (renting a sub’s time), or one-off services (e.g., a silly dance video).
-  - **Visibility Modes:** Full visibility (everyone sees bidders), limited (only seller sees bidders), anonymous (identities revealed post-sale).
-  - **Direct Offers:** Make private offers through the bot without DMing.
-- **Commands:**
-  - `/auction create <sub_id> <type=ownership/service> <starting_price> [visibility=...]`
-  - `/auction bid <auction_id> <amount>`
-  - `/auction end <auction_id>`
-  - `/offer send <sub_id> <amount>`: Send a direct offer to a sub’s owner(s).
-- **Database Tables:**
-  - `auctions(id SERIAL, sub_id INT, type TEXT, visibility TEXT, starting_price INT, active BOOLEAN, end_time TIMESTAMP)`
-  - `bids(id SERIAL, auction_id INT, bidder_id BIGINT, amount INT, timestamp TIMESTAMP)`
-  - `offers(id SERIAL, sub_id INT, sender_id BIGINT, amount INT, anonymous BOOLEAN, status TEXT)`
-
-### 3. **Contract & Escrow Cog**
-- **Purpose:** Manage long-term service agreements, milestone-based payments, and escrowed funds.
-- **Key Features:**
-  - **Milestones:** Contracts define multiple milestones that require both buyer and seller approval before releasing funds.
-  - **Disputes:** Staff can resolve conflicts if a milestone is contested.
-- **Commands:**
-  - `/contract create <sub_id> <service_id> <price> <milestones...>`
-  - `/contract approve_milestone <contract_id> <milestone_id>`
-  - `/contract dispute <contract_id>`
-- **Database Tables:**
-  - `contracts(id SERIAL, buyer_id BIGINT, sub_id INT, service_id INT, total_price INT, escrow_amount INT, status TEXT)`
-  - `contract_milestones(id SERIAL, contract_id INT, description TEXT, approved_by_buyer BOOLEAN, approved_by_seller BOOLEAN)`
-
-### 4. **Events & Temporary Voice Channels Cog**
-- **Purpose:** Subs/owners host special events (voice or text), gain temporary mod perms in those channels.
-- **Key Features:**
-  - Temporary voice channels that auto-delete after an event.
-  - Owner permissions to mute/deafen/kick in that event channel only.
-- **Commands:**
-  - `/event create <sub_id> <type=voice/text> <duration>`
-  - `/event end <event_id>`
-- **Database Tables:**
-  - `events(id SERIAL, sub_id INT, channel_id BIGINT, end_time TIMESTAMP)`
-
-### 5. **Reputation Cog**
-- **Purpose:** Track ratings and reviews of subs (and possibly owners).
-- **Key Features:**
-  - Post-service rating & review. Aggregate scores visible on sub profiles.
-- **Commands:**
-  - `/review add <sub_id> <rating> <comment>`
-  - `/review view <sub_id>`
-- **Database Tables:**
-  - `reviews(id SERIAL, sub_id INT, user_id BIGINT, rating INT, comment TEXT, timestamp TIMESTAMP)`
-
-### 6. **Tips & Economy Cog**
-- **Purpose:** Handle wallets, tipping, subscriptions, and payment distribution.
-- **Key Features:**
-  - Every user has a wallet. Tips and payments are distributed according to ownership shares.
-  - Subscribers pay recurring fees.
-  - Economy modes (open, moderated, strict) where large or all transactions require staff approval.
-- **Commands:**
-  - `/tip <@user|sub_id> <amount>`
-  - `/transfer <@user> <amount>`
-  - `/staff approve_transaction <tx_id>`
-  - `/staff deny_transaction <tx_id>`
-  - `/config economy_mode set <open|moderated|strict>`
-- **Database Tables:**
-  - `wallets(user_id BIGINT PRIMARY KEY, balance INT)`
-  - `transactions(id SERIAL, sender_id BIGINT, recipient_id BIGINT, amount INT, timestamp TIMESTAMP, status TEXT, justification TEXT)`
-
-### 7. **Server Management Cog**
-- **Purpose:** Central configuration for toggles, roles, permissions, theme settings, and backup parameters.
-- **Key Features:**
-  - Toggle features on/off.
-  - Set staff roles and their permissions.
-  - Change economy mode.
-  - Manage backup recipients and intervals.
-- **Commands:**
-  - `/config feature <feature_name> on|off`
-  - `/config add_staff_role @Role`
-  - `/config remove_staff_role @Role`
-  - `/config backup add_user <user_id>`
-  - `/config backup remove_user <user_id>`
-  - `/config backup channel <channel_id>`
-  - `/config backup interval <minutes>`
-- **Database Tables:**
-  - `server_config(key TEXT PRIMARY KEY, value JSONB)`
-  - `staff_roles(role_id BIGINT)`
-  - `backup_recipients(user_id BIGINT)`
-
-### 8. **Backup & Utility Cog**
-- **Purpose:** Regular backups of the database, logging, searching, reminders, notifications.
-- **Key Features:**
-  - Every X minutes (default 15) perform an async backup of the database.
-  - Post backup file in a staff channel and DM configured backup users.
-  - Provide logging through `loguru`.
-  - Possibly caching common queries and providing search functionalities.
-- **Commands:**
-  - None user-facing by default, except possibly `/logs` or `/search`.
-- **Database (No new tables needed for backups)**
+## Table of Contents
+1. [Project Structure Overview](#project-structure-overview)
+2. [Detailed File Explanations](#detailed-file-explanations)
+   - [1. `./main.py`](#1-mainpy)
+   - [2. `./db.py`](#2-dbpy)
+   - [3. `./utils.py`](#3-utilspy)
+   - [4. `./strings.json`](#4-stringsjson)
+   - [5. `./config.json` and `./theme.json`](#5-configjson-and-themejson)
+   - [6. `./contract_views.py`](#6-contract_viewspy)
+   - [7. `./ownership_views.py`](#7-ownership_viewspy)
+   - [8. Cogs Directory](#8-cogs-directory)
+     - [8.1 `cogs/ownership.py`](#81-cogsownershippy)
+     - [8.2 `cogs/economy.py`](#82-cogseconomypy)
+     - [8.3 `cogs/moderation.py`](#83-cogsmoderationpy)
+     - [8.4 `cogs/contract_escrow.py`](#84-cogscontract_escrowpy)
+     - [8.5 `cogs/rules.py`](#85-cogsrulespy)
+     - [8.6 `cogs/backup.py`](#86-cogsbackuppy)
+     - [8.7 `cogs/role_cog.py`](#87-cogsrole_cogpy)
+     - [8.8 `cogs/reputation.py`](#88-cogsreputationpy)
+     - [8.9 `cogs/help.py`](#89-cogshelppy)
+     - [8.10 `cogs/management.py`](#810-cogsmanagementpy)
+     - [8.11 `cogs/events.py`](#811-cogseventspy)
+     - [8.12 `cogs/support_ticket.py`](#812-cogssupport_ticketpy)
+     - [8.13 `cogs/auctions.py`](#813-cogsauctionspy)
+3. [Unfinished Work & Placeholders](#unfinished-work--placeholders)
+4. [Checklist of Features & Tasks to Finalize](#checklist-of-features--tasks-to-finalize)
+5. [Known Bugs & Issues](#known-bugs--issues)
 
 ---
 
-## Data Flow & Operations
+## Project Structure Overview
 
-**User Interactions:**
-1. A user tries to tip a sub:  
-   - `/tip <sub> <amount>` → Check sub owners, split amount according to shares, possibly require approval if in strict mode. Update wallets & log transaction.
+The project is primarily organized as follows:
 
-2. Owner creates an auction for their sub’s time:  
-   - `/auction create ...` → Insert into `auctions`, start a background task to end it after a set time.
+- **`main.py`**: Entry point for the bot. Initializes the bot, loads config, connects to DB, and loads cogs.
+- **`db.py`**: Database interface (PostgreSQL) using `asyncpg`. Contains table creation and backup logic.
+- **`utils.py`**: Utility functions for JSON/CSV reads and writes, plus small helper utilities.
+- **`strings.json`** & **`theme.json`**: Shared user-facing text strings and theming (colors, emojis).
+- **`config.json`**: Main configuration file (bot token, channel IDs, roles, database credentials, etc.).
+- **`contract_views.py`** & **`ownership_views.py`**: Modular UI (Discord `View`/`Modal`) classes that handle user interactions around contracts, ownership claims, or partial claims.
+- **`cogs/`**: Directory containing separate modules (cogs) that group functionality such as moderation, economy, backup, events, etc. Each cog is a self-contained sub-feature.
 
-3. A buyer sets up a contract with milestones:  
-   - `/contract create ...` → Insert contract, hold total price in escrow (deduct from buyer’s wallet), release funds incrementally on milestone approvals.
-
-4. A backup task runs every 15 minutes:  
-   - Export DB snapshot as JSON or SQL dump. Post to staff channel and DM specified backup recipients. Store in two locations.
-
----
-
-## Configuration & Theming
-
-- **JSON Config Files:**  
-  `config.json` and `strings.json` loaded at startup.  
-  `config.json` for token, DB creds, backup settings, economy mode, etc.  
-  `strings.json` for user-facing strings (welcome messages, help text), embed titles, etc.
-
-- **Theming & Emojis:**  
-  A JSON file for emojis and colors: `theme.json`.  
-  A dictionary mapping keys like `"currency_emoji"` to an actual emoji.  
-  Allows changing branding easily.
-
-- **Localization:**  
-  Future-ready: you can add another `strings_<lang>.json` for language support. Just load the correct file at startup.
+Below is a deep dive into each file.
 
 ---
 
-## Database & Backup
+## Detailed File Explanations
 
-- **Async with `asyncpg`:**  
-  Initialize a connection pool on startup.  
-  Perform queries using async/await in a `Database` class.
+### 1. `main.py`
+**Purpose**: This is the bot’s main entry script.
 
-- **Backup Process:**
-  - A background task (loop) every `config["backup"]["interval_minutes"]`.
-  - `pg_dump` or a custom export (JSON dump of all tables) run asynchronously.
-  - Store backup file locally or in a cloud storage.
-  - Post the file in the staff Discord channel and DM backup recipients.
+**Key Points**:
+- **`MoguMoguBot` class** extends `commands.Bot`.  
+- Initializes with `command_prefix`, loads `config`, `strings`, `theme`.  
+- Manages the lifecycle (`on_ready`, `on_error`, `close`) and ensures DB is connected.
+- At the end (`if __name__ == '__main__':`), it calls `asyncio.run(main())` which:
+  - Loads config files
+  - Creates the bot instance
+  - Connects the DB (`bot.db.connect()`)
+  - Dynamically loads all `.py` files in `cogs/` as bot extensions
+  - Finally starts the bot using `bot.start(token)`
 
-- **Schema Migrations:**
-  Use a simple migration script or a tool like Alembic if needed.  
-  Migrations ensure the database schema stays up-to-date.
+**Notable Functions**:
+- `async def on_ready(self)`: Called when the bot finishes connecting.  
+- `async def on_error(self, event_method, *args, **kwargs)`: Global exception logger.
 
----
-
-## Concurrency & Performance
-
-- **Async File Operations:**  
-  Use `aiofiles` to handle JSON/CVS reads and writes asynchronously.  
-  For backups, `asyncio.create_subprocess_exec` to run `pg_dump` without blocking.
-
-- **Caching & Rate Limits:**
-  Cache frequently accessed sub profiles in memory. Invalidate cache on updates.  
-  Respect Discord rate limits by using the official HTTP client in discord.py.
-
-- **Scalability:**
-  The architecture is stateless aside from the DB, allowing horizontal scaling if needed. Multiple bot instances can share the same database.
+**Algorithm**:
+- The main event loop is standard for Discord bots: connect → load cogs → run until process ends.
 
 ---
 
-## Logging & Error Handling
+### 2. `db.py`
+**Purpose**: Handles all database operations and schema setup. Uses `asyncpg`.
 
-- **Logging:**
-  - Use `loguru` for rich logging (console + rotating file logs).
-  - Logs stored in `logs/` directory, rotated daily, kept for a configured retention period.
+**Key Classes & Methods**:
+- **`class Database:`**  
+  - `__init__(config)`: Accepts DB credentials from config.
+  - `connect()`: Creates a connection pool and ensures tables exist by calling `ensure_tables()`.
+  - `close()`: Gracefully closes the pool.
+  - `fetchrow(query, *args)`, `fetch(query, *args)`, `fetchval(query, *args)`, `execute(query, *args)`: Core query methods returning different result structures.
+  - `ensure_tables()`: Creates all necessary tables if not found. The SQL statements define the entire schema for the bot’s features.
+  - `backup_database()`: Uses `pg_dump` to produce an SQL dump of the database.
 
-- **Error Handling:**
-  - Global `on_error` and `on_command_error` handlers.
-  - Show user-friendly error messages in Discord.
-  - Log exceptions to help staff debug.
-
----
-
-## Example Folder Structure
-
-```
-project/
-├─ main.py
-├─ config.json
-├─ strings.json
-├─ theme.json
-├─ db.py
-├─ utils.py
-├─ logs/
-├─ cogs/
-│  ├─ help.py
-│  ├─ backup.py
-│  ├─ ownership_sub.py
-│  ├─ auction_marketplace.py
-│  ├─ contract_escrow.py
-│  ├─ events.py
-│  ├─ reputation.py
-│  ├─ economy.py
-│  ├─ management.py
-```
+**Algorithmic Complexity**:
+- Primarily standard SQL operations. Nothing particularly complex (O(1) to O(n) typical queries).
 
 ---
 
-## Conclusion
+### 3. `utils.py`
+**Purpose**: Contains small helper utilities for JSON, CSV, and dictionary tasks.
 
-This blueprint provides a comprehensive, production-ready design for your Discord bot, ensuring all requested features—multi-owner subs, flexible economy, auctions, contracts, events, reputations, backups, theming, and configuration—are considered. By following this plan, you can implement the bot incrementally, starting with the core database and config setup, then adding each cog and ensuring all aspects remain asynchronous, scalable, and user-friendly.
+**Functions**:
+- `load_json_config(file)`: Asynchronous read of a JSON file into a dictionary. Logs errors if not found or invalid JSON.
+- `write_json_config(file, config)`: Async write dictionary to JSON file.
+- `write_csv_file(file, data)`: Async CSV writer using `asyncio.to_thread` to offload I/O.
+- `get_highest_dict_key(dictionary)`: Finds the key with the highest value in a dictionary.
+
+**Algorithms**:
+- Basic I/O. The dictionary max-key logic is `max()` with a custom lambda. O(n) in dict size.
+
+---
+
+### 4. `strings.json`
+A basic JSON file containing user-facing text strings.  
+**Keys**:
+- `welcome_message`, `help_title`, `help_description`, etc.
+
+Allows for dynamic or multi-lingual expansions.
+
+---
+
+### 5. `config.json` and `theme.json`
+- **`config.json`**: Holds environment variables and IDs:
+  - Bot token, channel IDs, role IDs, DB creds, staff roles, tip options, etc.
+- **`theme.json`**: UI styling, e.g. `embed_color`, certain emojis for success/error, etc.
+
+**Security Note**: Real credentials (token, DB pass) are shown here.  
+**Recommendation**: In production, ensure these are excluded from version control or replaced with environment variables.
+
+---
+
+### 6. `contract_views.py`
+**Purpose**: Contains Discord UI classes (`discord.ui.View`, `discord.ui.Modal`) that handle the user flow for creating or fulfilling contracts in an escrow-based system.
+
+**Classes**:
+- `ConfirmDeleteModal`: A modal for confirming deletion of an advert.
+- `AdvertView`: Allows users to “Make Offer” or “Delete Advert”.
+- `OfferCreationModal`: Collects details (price, message) from a potential buyer.
+- `ConfirmFulfillModal`, `ConfirmCancelModal`: Final modals for fulfilling or canceling a contract.
+- `DisputeReasonSelect` & `DisputeView`: Gathers the reason for a dispute.  
+- `ContractView`: The main active contract UI with [Fulfill], [Cancel], [Dispute] buttons.
+
+**Algorithm**:
+- The logic for each button callback is delegated to callbacks in `contract_escrow.py`.  
+- Each view is persistent.  
+- No heavy computations, only user interaction flows.
+
+---
+
+### 7. `ownership_views.py`
+**Purpose**: Provides Discord UI flows for ownership claims. Sub-systems: staff approvals, user approvals, DM toggles, partial claims.
+
+**Key Classes**:
+- `OwnershipClaimStaffView`, `OwnershipClaimSubView`: Let staff or the sub user Approve/Deny a claim.
+- `SingleUserOwnershipView`: DMs the user with an interactive embed showing ownership details, toggling DM permissions, etc.
+- `AskForDMApprovalView`, `AskForDMJustificationModal`: Another ephemeral flow for “Ask to DM” approvals.
+- `OwnershipBrowserView`, `OwnershipUserSelect`: Slash-based ephemeral UI to browse user ownership info.
+- `TransactModal`: For direct credit transactions.
+- `PartialClaimModal`, `DirectClaimModal`: Collect details for partial or direct ownership claims.
+- `MajorityOwnerClaimView`, `SubClaimView`: Show majority owner or sub to approve/counter/reject the claim.
+- `CounterOfferModal`, `NewUserCounterView`, `MajorityRejectModal`, `SubRejectModal`: Additional flows for claims, rejections, counters.
+
+**Algorithm**:
+- Multi-step interactive flows using Discord modals, select menus, buttons.  
+- Underlying logic is handled in `cogs/ownership.py`.
+
+---
+
+### 8. Cogs Directory
+Each `.py` inside `cogs/` is a specialized feature cog. They use the Discord `commands.Cog` architecture and register slash commands.
+
+#### 8.1 `cogs/ownership.py`
+Manages sub ownership claims, partial ownership transfers, DM permission toggling, cooldowns, staff approvals, etc.
+
+**Key Elements**:
+- **`OwnershipCog`**:  
+  - Slash commands: `/ownership browse`, `/ownership transfer_full`, `/ownership propose`, etc.
+  - `connect` to DB for all ownership data: `sub_ownership`, `claims`.
+  - Methods to handle new claims, partial vs. direct, staff approvals, sub approvals.
+  - DM permission toggles: `toggle_dm_permissions`, `handle_dm_request`.
+  - Auction-like or direct BFS logic for finding majority owner if partial ownership is requested.
+
+**Algorithms**:
+- `apply_rejected_cooldown`, `apply_success_cooldowns` impose cooldown logic.  
+- Database ensures no double-claim or concurrency issues.  
+- Ownership claims rely on role checks (Harlot vs. Gentleman) and staff final approval.
+
+---
+
+#### 8.2 `cogs/economy.py`
+Implements a concurrency-safe wallet system with **transfer_balance**, **tips** (reaction-based), and a “blockchain-like” ledger.
+
+**Features**:
+- Reaction tipping: if user reacts with certain emojis, automatically transfers credits from tipper to tippee.
+- Slash commands: `/economy balance`, `/economy transfer`.
+- Logs transactions in a `transactions` table with hashed links for a “blockchain-like” approach.
+
+**Functions**:
+- `on_raw_reaction_add`, `on_raw_reaction_remove`: handle tip add and refunds.
+- `ensure_wallet_exists`, `get_balance`, `transfer_balance`: Key DB operations.
+
+---
+
+#### 8.3 `cogs/moderation.py`
+Standard moderation commands for staff:
+- `/moderation ban`, `/moderation kick`, `/moderation mute`, etc.
+- Logs each action to `moderation_logs`.
+
+**Notes**:
+- Also includes a `warn` command storing user warnings.
+- Basic checks for role hierarchy to avoid banning higher-level staff by mistake.
+
+---
+
+#### 8.4 `cogs/contract_escrow.py`
+Manages the creation and usage of **contracts** (paid services, fulfilling, canceling, disputes). Ties in with the UI from `contract_views.py`.
+
+**Key Flows**:
+- `/contract advert`: Post a new advert (with an `AdvertView`).
+- Potential buyers “Make Offer” → triggers a modal → sends DM to the seller for acceptance or decline → upon acceptance, a contract is created, escrow is deducted from buyer, etc.
+- `ContractView`: [Fulfill], [Cancel], [Dispute] logic. On fulfill, releases escrow to the seller; on cancel, refunds buyer; on dispute, notifies staff.
+
+**Algorithms**:
+- Basic state machine for contract status: `active`, `canceled`, `disputed`, `completed`.
+
+---
+
+#### 8.5 `cogs/rules.py`
+Implements a rules acceptance flow with multiple pages (SSC, RACK, PRICK). Users who accept get the “Verified” role, logs acceptance in DB.
+
+**Key Classes**:
+- `RulesCog`:  
+  - Maintains a pinned message (the main rules) with ephemeral “Begin” or “Unaccept” buttons.  
+  - The ephemeral multi-page acceptance is handled by `MultiPageRulesView`.
+- Integrates with a `rules_text` table in DB.
+
+---
+
+#### 8.6 `cogs/backup.py`
+Automates database backup every X minutes, distributing `.sql` dumps to staff channels and DM recipients.
+
+**Core**:
+- **`BackupCog`** with a `tasks.loop` that calls `do_backup()`:
+  - `backup_database()` from `db.py`
+  - DMs staff recipients, posts in a staff channel, also creates a “fallback JSON”.
+
+**Also**: Provides slash commands to manually `/backup now` or restore from a given SQL dump URL.
+
+---
+
+#### 8.7 `cogs/role_cog.py`
+Implements a multi-page ephemeral flow for members to pick roles (age, gender, location, orientation, DM status, kinks, etc.). Persists to a `user_roles` table. Also applies or removes matching Discord roles.
+
+**Classes**:
+- `MultiUserRoleSelectCog`  
+  - Has a “role setup message” that calls `RoleSetupView`.  
+- `RoleSetupView`: The public message with “Choose Roles” button → ephemeral 4-page UI.
+- `RolesFlowView`: Detailed multi-step collection, finishing with updating DB and applying roles with progress feedback.
+
+---
+
+#### 8.8 `cogs/reputation.py`
+Handles sub “reputation” or review system:
+- `/reputation add sub_id rating comment?` → logs rating in `reviews`.
+- `/reputation view sub_id` → shows average rating, top 5 reviews.
+
+---
+
+#### 8.9 `cogs/help.py`
+A custom help command listing slash commands, optionally hiding staff commands from non-staff.  
+**`Help` Cog** uses `slash_command(name='help')` to gather commands dynamically.
+
+---
+
+#### 8.10 `cogs/management.py`
+Server management commands for staff. Examples:
+- Toggling features, adding staff roles, setting backup intervals, exporting/importing permissions.
+
+**Key**:
+- Exports roles and channel overwrites to JSON, can re-import them.  
+- Potentially large chunk-based rate-limited updates.
+
+---
+
+#### 8.11 `cogs/events.py`
+Sub owners can create temporary event channels (voice or text) that auto-delete after a specified end time.
+
+**Key**:
+- `events` slash command group.  
+- Stored in `events` DB table with `end_time`. A background loop checks for expired events and deletes the channels.
+
+---
+
+#### 8.12 `cogs/support_ticket.py`
+Implements a basic support ticket system with private threads, and a verification flow if a user is unverified:
+- The user can “Get Support” (which creates a private thread in a `support_channel_id`).
+- Or “Get Verified” (which logs staff approvals, can auto-kick on rejection, etc.).
+
+**Core**:
+- `SupportTicketCog`, a background task to close inactive tickets after `inactivity_limit`.
+- `SplashContactView` pinned in the support channel. Buttons lead to ephemeral modals.
+
+**Verification**:
+- `VerificationModal` collects answers and an image link, logs in DB.
+- Staff do a 2-approval flow. If success, user is given “Verified” role. If rejected, can be kicked.
+
+---
+
+#### 8.13 `cogs/auctions.py`
+**WIP** for a new “auction” feature, presumably letting users or owners auction sub ownership or services. 
+**`AuctionCog`** has placeholders:
+- `/auction create`: ephemeral multi-step
+- `schedule_loop`: to automatically start/end auctions
+- `_finalize_auction(...)`: partial or no code
+- `post_public_auction_embed(...)`, `update_auction_embed(...)`: placeholders
+- The `AuctionCreateFlowView` and “bidding” UI are present but incomplete.
+
+---
+
+## Unfinished Work & Placeholders
+
+1. **Auction System (`cogs/auctions.py`)**:
+   - Most endpoints are placeholders (`create_auction_cmd`, `auction_info_cmd`, `end_auction_cmd`).
+   - The scheduling loop references planned DB logic but is incomplete.
+   - `_finalize_auction` and embed posting are skeleton methods.
+
+2. **Advanced Contract Handling**:
+   - Some advanced features (partial refunds, milestone-based contracts) are toggled in `FEATURES` but not fully implemented.
+
+3. **Verification**:
+   - The code is robust, but final “kick on rejection” or role-based separation might need more testing. 
+   - No direct user interface to re-try after rejection is described.
+
+4. **Event Cog**:
+   - The code is functional but might need deeper testing of concurrency or checks for invalid sub ID.
+
+5. **Help Cog**:
+   - The help cog attempts to hide staff commands from non-staff but the logic in `is_staff_command` is basic. 
+   - The actual referencing of `user_is_staff` is incomplete (`user_is_staff` is not clearly implemented in the file).
+
+6. **Import/Export of Permissions**:
+   - Possibly needs more robust handling of concurrency, large guilds, or rate-limits.
+
+7. **Economy**:
+   - Reaction-based tip removal might fail if the recipient already spent the balance. 
+   - No fallback or partial refund logic is present if the tippee is out of credits.
+
+8. **“Magical Strings”**:
+   - Certain strings or references (like “Harlot” or “Gentleman”) are domain-specific. If the server wants different naming, might require refactors or config expansions.
+
+9. **Testing**:
+   - Full end-to-end tests for major flows like partial ownership claims, advanced dispute handling, or the new Auction system are not in place.
+
+---
+
+## Checklist of Features & Tasks to Finalize
+
+1. **Auction Module Completion**  
+   - [ ] Implement DB schema expansions (`auction` table partial references are in `db.py`, but fully define usage).  
+   - [ ] Finish `create_auction_cmd` ephemeral flow:
+     - Collect `start_time`, `end_time`, `sub_id`, `type`, etc.  
+     - Insert DB record.  
+     - Immediately or later post embed if `start_time <= now`.  
+   - [ ] Implement `schedule_loop` to start/stop auctions automatically.  
+   - [ ] Implement `_finalize_auction` to handle highest bid, transferring ownership or awarding sub shares.  
+   - [ ] Add a `Bid` table in DB with concurrency checks.  
+
+2. **Economy**  
+   - [ ] Possibly handle negative balance scenarios for tip removal more gracefully.  
+   - [ ] Add partial or “insufficient funds” logic if the tippee cannot refund a removed tip.  
+
+3. **Ownership**  
+   - [ ] More robust staff approval logic for partial claims (some code is present, but re-check if the required staff threshold is 2 or more, how to handle re-votes).  
+   - [ ] Unit-tests for edge cases: removing partial shares if user tries to claim more than available.
+
+4. **Contract Escrow**  
+   - [ ] Fully implement advanced features in `FEATURES` (partial refunds, milestone-based payments, auto-cancel).  
+   - [ ] Thoroughly test dispute flows with staff forced resolution.
+
+5. **Rules Cog**  
+   - [ ] Provide an admin UI or slash command to tweak the 3 pages (SSC, RACK, PRICK) without direct DB editing. There's a partial `/rules_edit` command, but confirm if it needs expansions.  
+
+6. **Help Cog**  
+   - [ ] Confirm the staff vs. public command filtering. Possibly implement a robust permission check.  
+
+7. **Support Ticket**  
+   - [ ] Additional features: add co-owners or multiple staff?  
+   - [ ] More logging or transcript formats (HTML or PDF?).  
+
+8. **Testing & QA**  
+   - [ ] End-to-end tests on a staging server to confirm flows, especially partial claims, auctions, verification.  
+   - [ ] Expand error handling for concurrency or DB failures.  
+
+---
+
+## Known Bugs & Issues
+
+1. **Help Cog Staff Check**  
+   - The `help` command references a `user_is_staff` variable or function not defined. This can lead to a NameError or skip the staff filtering logic.
+
+2. **Auction Code**  
+   - Currently incomplete, placeholders might break if a user attempts to run `/auction create` or the scheduling loop tries to fetch data from the DB. The relevant tables exist but the logic is not robust.
+
+3. **Tip Refund**  
+   - If a user tips someone, then removes the reaction, the code attempts to refund. If the tippee’s balance is insufficient (already spent), the transaction fails. This is partially logged but no user feedback is provided beyond a log warning.
+
+4. **Role Cog**  
+   - Attempting to add or remove roles that do not exist in the guild can fail silently. There's partial logging, but no user feedback if a role mismatch occurs.
+
+5. **DM Toggles**  
+   - If a user tries to toggle DMs but has no entry in `open_dm_perms`, there's a chance of confusion. The code attempts to handle this, but concurrency edge cases may cause unexpected results.  
+
+6. **Unverified/Escrow Edge Cases**  
+   - If a user is forced out of a contract, some references to partial data may remain.  
+
+7. **Database Backup**  
+   - If `pg_dump` or `psql` is not in PATH, backups or restore will fail with limited fallback.
+
+8. **Large Channel/Role Imports**  
+   - The chunk-based approach in `management.py` is a best effort. Extremely large servers could still face rate limits or partial failures if Discord’s concurrency is exceeded.  
+
+---
+
+**End of Document** 
+
+---
+
+This **README** aims to give a full understanding of each component, highlight missing features, and outline tasks for completion. For further clarifications on any specific module or deeper architectural questions, see inline docstrings or contact the original developer.

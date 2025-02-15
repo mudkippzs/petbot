@@ -49,7 +49,7 @@ class Economy(commands.Cog):
                     if await self.ensure_wallet_exists(member.id):
                         total_created += 1
 
-        logger.info(f"[Economy] Completed wallet checks. Created {total_created} new wallets.")
+        logger.debug(f"Completed wallet checks. Created {total_created} new wallets.")
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):

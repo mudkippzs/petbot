@@ -10,7 +10,6 @@ from typing import Optional, List
 
 VERIFICATION_LOG_CHANNEL_ID = 1331573988584853524  # The channel for verification logs
 STAFF_ROLE_NAMES = ["Owner", "Underboss", "The Company", "Consigliere"] 
-# or use IDs from your config, e.g. staff_roles = [12345, 67890, ...]
 
 YELLOW = 0xFFFF00
 GREEN = 0x00FF00
@@ -45,7 +44,7 @@ class SupportTicketCog(commands.Cog):
         if not support_channel:
             return
 
-        now = datetime.datetime.utcnow()
+        now = datetime.datetime.now(datetime.timezone.utc)
 
         # Use a normal `for` instead of `async for` since threads is just a list
         for thread in support_channel.threads:
@@ -632,7 +631,7 @@ class SupportTicketModal(discord.ui.Modal):
         )
 
         # 8) Now alert staff in a designated staff channel
-        staff_channel_id = self.bot.config.get("staff_ticket_channel_id")
+        staff_channel_id = self.bot.config.get("support_channel_id")
         staff_channel = self.bot.get_channel(staff_channel_id)
         if not staff_channel:
             # If no staff channel is configured/found, just log or skip
@@ -642,7 +641,7 @@ class SupportTicketModal(discord.ui.Modal):
         staff_mentions = []
 
         for role_name in staff_role_names:
-            role = get(interaction.guild.roles, name=role_name)
+            role = discord.utils.get(interaction.guild.roles, name=role_name)
             if role:
                 staff_mentions.append(role.mention)
 

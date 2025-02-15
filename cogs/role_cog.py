@@ -410,12 +410,18 @@ class RolesFlowView(discord.ui.View):
     # ─────────────────────────────────────────────────────────────────────
     # Finish Flow: upsert DB + remove/add Discord roles
     # ─────────────────────────────────────────────────────────────────────
-    async def finish_flow(self, interaction: discord.Interaction):
-        logger.debug("[finish_flow] Starting for user=%s", interaction.user.display_name)
-        await interaction.response.defer(ephemeral=True)
+    async def finish_flow_with_progress(self, interaction: discord.Interaction):
+        """
+        Example of a "finish flow" that shows a loading bar incrementally as roles are removed/added.
+        """
+        logger.debug(f"[finish_flow_with_progress] Starting for user={interaction.user.display_name}")
+
+        # 1) Show initial ephemeral "Working..." message
+        #    We'll edit this message repeatedly to show progress.
+        progress_msg = await interaction.followup.send("Applying changes... 0% done.", ephemeral=True)
 
         new = self.new_data
-        logger.debug(f"[finish_flow] new_data={new}")
+        logger.debug(f"[finish_flow_with_progress] new_data={new}")
 
         # Check advanced kinks
         advanced_selected = [k for k in new["kinks"] if k.lower() in ADVANCED_KINK_VALUES]
@@ -427,7 +433,9 @@ class RolesFlowView(discord.ui.View):
                 "By proceeding, you confirm you understand the associated risks.\n\n"
             )
 
-        # Upsert
+        # ──────────────────────────────────────────────────────────────────
+        #   2) Upsert into DB
+        # ──────────────────────────────────────────────────────────────────
         upsert_query = """
             INSERT INTO user_roles (
                 user_id,
@@ -465,7 +473,7 @@ class RolesFlowView(discord.ui.View):
             new["kinks"],
         )
 
-        # Fetch updated record
+        # Get the fresh record from DB
         fresh = await self.bot.db.fetchrow("SELECT * FROM user_roles WHERE user_id=$1", self.user.id)
         if not fresh:
             logger.warning("[finish_flow] No record found after upsert.")
@@ -482,9 +490,13 @@ class RolesFlowView(discord.ui.View):
         else:
             fresh = dict(fresh)
 
-        # Remove old roles, add new roles
+        # ──────────────────────────────────────────────────────────────────
+        #   3) Figure out all the roles to remove/add so we can track progress
+        # ──────────────────────────────────────────────────────────────────
         old = self.old_record
         member = self.user
+        remove_actions = []
+        add_actions = []
 
         # Single-value fields
         single_map = {
@@ -499,21 +511,12 @@ class RolesFlowView(discord.ui.View):
             old_val = old.get(db_column)
             new_val = fresh.get(db_column)
 
+            # If there's an old value we need to remove
             if old_val and old_val != new_val:
-                old_role = discord.utils.get(member.guild.roles, name=old_val)
-                if old_role and old_role in member.roles:
-                    try:
-                        await member.remove_roles(old_role, reason=f"Removing old {field_label}")
-                    except Exception as e:
-                        logger.warning(f"Failed to remove role {old_val}: {e}")
-
+                remove_actions.append((old_val, f"Removing old {field_label}"))
+            # If there's a new value we need to add
             if new_val and new_val != old_val:
-                new_role = discord.utils.get(member.guild.roles, name=new_val)
-                if new_role:
-                    try:
-                        await member.add_roles(new_role, reason=f"Adding new {field_label}")
-                    except Exception as e:
-                        logger.warning(f"Failed to add role {new_val}: {e}")
+                add_actions.append((new_val, f"Adding new {field_label}"))
 
         # Multi-value fields
         multi_fields = ["here_for", "ping_roles", "kinks"]
@@ -524,53 +527,108 @@ class RolesFlowView(discord.ui.View):
             to_add = new_vals - old_vals
 
             for val in to_remove:
-                role = discord.utils.get(member.guild.roles, name=val)
-                if role and role in member.roles:
-                    try:
-                        await member.remove_roles(role, reason=f"Remove {field}")
-                    except Exception as e:
-                        logger.warning(f"Failed removing {field} role {val}: {e}")
-
+                remove_actions.append((val, f"Remove {field}"))
             for val in to_add:
-                role = discord.utils.get(member.guild.roles, name=val)
-                if role:
-                    try:
-                        await member.add_roles(role, reason=f"Add {field}")
-                    except Exception as e:
-                        logger.warning(f"Failed adding {field} role {val}: {e}")
+                add_actions.append((val, f"Add {field}"))
 
-        # Remove placeholders
+        # Total chunk count for progress, e.g. each role remove/add is 1 chunk
+        total_actions = len(remove_actions) + len(add_actions)
+        if total_actions == 0:
+            # Nothing to change at the role level; just confirm
+            return await self._finish_and_summarize(
+                interaction, progress_msg, disclaimers, fresh
+            )
+
+        # ──────────────────────────────────────────────────────────────────
+        #   4) Perform each remove/add action in a loop, updating progress
+        # ──────────────────────────────────────────────────────────────────
+        completed = 0
+
+        # 4a) Remove roles first
+        for role_name, reason in remove_actions:
+            # Attempt to remove from Discord
+            role = discord.utils.get(member.guild.roles, name=role_name)
+            if role and role in member.roles:
+                try:
+                    await member.remove_roles(role, reason=reason)
+                except Exception as e:
+                    logger.warning(f"Failed to remove role {role_name}: {e}")
+            completed += 1
+            # Update ephemeral progress after each chunk
+            await self._update_progress(progress_msg, completed, total_actions)
+
+        # 4b) Add roles
+        for role_name, reason in add_actions:
+            # Skip placeholders
+            if role_name.startswith("n0t_a_r0le_"):
+                completed += 1
+                await self._update_progress(progress_msg, completed, total_actions)
+                continue
+
+            # Attempt to add the role
+            role = discord.utils.get(member.guild.roles, name=role_name)
+            if role:
+                try:
+                    await member.add_roles(role, reason=reason)
+                except Exception as e:
+                    logger.warning(f"Failed to add role {role_name}: {e}")
+            completed += 1
+            await self._update_progress(progress_msg, completed, total_actions)
+
+        # ──────────────────────────────────────────────────────────────────
+        #   5) Finished applying roles; show final summary & disclaimers
+        # ──────────────────────────────────────────────────────────────────
+        await self._finish_and_summarize(interaction, progress_msg, disclaimers, fresh)
+
+
+    async def _update_progress(self, msg: discord.WebhookMessage, done: int, total: int):
+        """Update ephemeral progress message with a simple text-based progress bar."""
+        pct = int((done / total) * 100)
+        # For example, we can do a 20-char bar
+        bar_length = 20
+        filled_length = int(bar_length * done // total)
+        bar_str = "█" * filled_length + "░" * (bar_length - filled_length)
+
+        await msg.edit(content=f"Applying changes... {bar_str} {pct}% done.")
+
+
+    async def _finish_and_summarize(self, interaction: discord.Interaction,
+                                    progress_msg: discord.WebhookMessage,
+                                    disclaimers: str,
+                                    fresh_data: Dict[str, Any]):
+        """
+        Once everything is applied, show the final summary.
+        """
+        # Remove placeholders if they're in the final list
         for placeholder in (
             "n0t_a_r0le_bondage",
             "n0t_a_r0le_physical",
             "n0t_a_r0le_psychic",
-            "n0t_a_r0le_extreme"
+            "n0t_a_r0le_extreme",
         ):
-            if placeholder in fresh["kinks"]:
-                fresh["kinks"].remove(placeholder)
+            if placeholder in fresh_data["kinks"]:
+                fresh_data["kinks"].remove(placeholder)
 
-        # Summarize
         summary_list = [
-            f"**Title**: {fresh['gender_role'] or 'None'}",
-            f"**Age**: {fresh['age_range'] or 'None'}",
-            f"**Location**: {fresh['location'] or 'None'}",
-            f"**Orientation**: {fresh['orientation'] or 'None'}",
-            f"**DM Status**: {fresh['dm_status'] or 'None'}",
-            f"**Here For**: {', '.join(fresh['here_for']) or 'None'}",
-            f"**Ping Roles**: {', '.join(fresh['ping_roles']) or 'None'}",
-            f"**Kinks**: {', '.join(fresh['kinks']) or 'None'}",
+            f"**Title**: {fresh_data['gender_role'] or 'None'}",
+            f"**Age**: {fresh_data['age_range'] or 'None'}",
+            f"**Location**: {fresh_data['location'] or 'None'}",
+            f"**Orientation**: {fresh_data['orientation'] or 'None'}",
+            f"**DM Status**: {fresh_data['dm_status'] or 'None'}",
+            f"**Here For**: {', '.join(fresh_data['here_for']) or 'None'}",
+            f"**Ping Roles**: {', '.join(fresh_data['ping_roles']) or 'None'}",
+            f"**Kinks**: {', '.join(fresh_data['kinks']) or 'None'}",
         ]
         summary_str = "\n".join(summary_list)
 
         final_msg = f"{disclaimers}**Your final selections**:\n{summary_str}\n\nPreferences saved!"
+        await progress_msg.edit(content=final_msg)
 
-        # Show ephemeral final result
-        await interaction.followup.send(final_msg, ephemeral=True, delete_after=30.0)
-
-        # Disable the view
+        # Clear out the items on the View so everything is effectively done
         self.clear_items()
-        await interaction.followup.edit_message(message_id=interaction.message.id, view=self)
+        await interaction.edit_original_response(view=self)
         self.stop()
+
 
 
 ##############################################################################
@@ -857,7 +915,21 @@ class FinishButton(discord.ui.Button):
         self.parent_view = parent_view
 
     async def callback(self, interaction: discord.Interaction):
-        await self.parent_view.finish_flow(interaction)
+        # If user double-clicks, just stop
+        if self.disabled:
+            return await interaction.response.send_message(
+                "Finish flow already in progress!", ephemeral=True
+            )
+
+        # Disable in code
+        self.disabled = True
+        # Edit the original ephemeral message so the user *sees* the disabled button
+        await interaction.response.edit_message(view=self.parent_view)
+
+        # Now do the rest of your finishing logic
+        # e.g., writing to DB, removing/adding roles, etc.
+        await self.parent_view.finish_flow_with_progress(interaction)
+
 
 
 ##############################################################################

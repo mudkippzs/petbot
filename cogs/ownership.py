@@ -3,7 +3,7 @@ import datetime
 from discord.ext import commands, tasks
 from discord.commands import SlashCommandGroup, Option
 from loguru import logger
-from typing import Optional, TYPE_CHECKING, Union
+from typing import Optional, Tuple, TYPE_CHECKING, Union
 import asyncio
 import time
 import hashlib
@@ -109,20 +109,33 @@ class OwnershipCog(commands.Cog):
             WHERE active=TRUE;
             """
         )
-        now = datetime.datetime.utcnow()
+
         for r in dm_rows:
             msg_id = r["message_id"]
+
+            # This is the viewer:
+            viewer_user = self.bot.get_user(r["user_id"])
+            if not viewer_user:
+                continue
+
             target_user = self.bot.get_user(r["target_user_id"])
             if not target_user:
                 continue
-            expires_at = r["expires_at"]
-            remaining = (expires_at - now).total_seconds()
-            if remaining <= 0:
-                continue  # Skip views that have already expired.
-            # Create the view with the remaining timeout.
-            view = SingleUserOwnershipView(bot=self.bot, target_user=target_user, timeout=remaining, message_id=msg_id)
+
+            # Re‐create the view
+            view = SingleUserOwnershipView(
+                bot=self.bot,
+                target_user=target_user,
+                viewer_user=viewer_user,
+                timeout=None,
+                message_id=msg_id
+            )
+
+            # Attach the view to the message
             self.bot.add_view(view, message_id=msg_id)
-            logger.debug(f"Reattached SingleUserOwnershipView for message {msg_id} with {remaining:.1f} seconds remaining.")
+
+            await view.refresh_button_label()
+
 
     # ------------------------------------------------------------------
     # Reaction-based "🔍" -> DM (User Browser Trigger)
@@ -247,7 +260,7 @@ class OwnershipCog(commands.Cog):
         embed.set_thumbnail(url=target_user.display_avatar)
 
         # Create a SingleUserOwnershipView with a 10-minute lifetime.
-        view = SingleUserOwnershipView(bot=self.bot, target_user=target_user, timeout=600)
+        view = SingleUserOwnershipView(bot=self.bot, target_user=target_user, viewer_user=member, timeout=600)
         dm_msg = await dm.send(embed=embed, view=view)
 
         # Record the DM view along with its expiration time (10 minutes from now)
@@ -639,7 +652,7 @@ class OwnershipCog(commands.Cog):
         last_req = self.dm_request_cooldowns.get(requestor.id, 0)
         if now - last_req < self.dm_request_cooldown:
             remaining = int(self.dm_request_cooldown - (now - last_req))
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"You are on cooldown. Wait {remaining} seconds before requesting DM again.",
                 ephemeral=True
             )
@@ -660,12 +673,12 @@ class OwnershipCog(commands.Cog):
 
         if "open" in dm_status:
             await self.add_open_dm_pair(requestor.id, target_user.id, reason="auto_open")
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 "That user’s DMs are open by default. You now have permission to DM them.",
                 ephemeral=True
             )
         elif "closed" in dm_status:
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 "They have closed DMs. You cannot DM them at this time.",
                 ephemeral=True
             )
@@ -689,17 +702,17 @@ class OwnershipCog(commands.Cog):
                             interaction=interaction
                         )
                     else:
-                        await interaction.response.send_message(
+                        await interaction.followup.send(
                             "No valid majority owner found or user not in guild. Cannot proceed.",
                             ephemeral=True
                         )
                 else:
-                    await interaction.response.send_message(
+                    await interaction.followup.send(
                         "No majority owner found; cannot request approval.",
                         ephemeral=True
                     )
         else:
-            return await interaction.response.send_message(
+            return await interaction.followup.send(
                 "DM status unknown; cannot request DM.",
                 ephemeral=True
             )
@@ -744,7 +757,7 @@ class OwnershipCog(commands.Cog):
                 color=discord.Color.gold()
             )
             await dm.send(embed=dm_embed, view=view)
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"DM approval request sent to {approver.mention}.",
                 ephemeral=True
             )
@@ -755,7 +768,7 @@ class OwnershipCog(commands.Cog):
                 color=discord.Color.red()
             )
             await log_msg.edit(embed=fail_embed)
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "Could not DM the approver (Forbidden).",
                 ephemeral=True
             )
@@ -790,6 +803,77 @@ class OwnershipCog(commands.Cog):
             """,
             umin, umax, reason
         )
+
+    async def toggle_dm_permissions(
+        self,
+        invoker: discord.Member,
+        target: discord.Member,
+        interaction: discord.Interaction,
+        reason: str = "user_toggle"
+    ) -> Tuple[bool, bool, str]:
+        """
+        Attempts to toggle DM permissions between 'invoker' and 'target'.
+        - If the pair is currently active, close it.
+        - If the pair is currently inactive, run the 'handle_dm_request' flow to open it.
+          (That might involve "ask to DM" approvals, or an auto-open if the target's dm_status='open'.)
+        
+        Returns (did_something, is_now_open, message_for_user).
+          - did_something: bool indicating if we actually changed the DB state
+          - is_now_open: bool indicating the final state (True if now open, False if closed or unchanged)
+          - message_for_user: a string you can show in an ephemeral response
+        """
+        # 1) Check if currently open
+        row = await self.bot.db.fetchrow(
+            """
+            SELECT active FROM open_dm_perms
+             WHERE (user1_id=$1 AND user2_id=$2) OR (user1_id=$2 AND user2_id=$1)
+            """,
+            invoker.id, target.id
+        )
+        currently_open = bool(row and row["active"])
+
+        # 2) If currently open, we will close it:
+        if currently_open:
+            await self.close_dm_pair(invoker.id, target.id, reason=reason)
+            return (True, False, f"You have **closed** DMs with {target.display_name}.")
+
+        # 3) If currently closed, we want to open. But you already have a method
+        #    'handle_dm_request()' that does the "ask to DM" logic or auto-opens if dm_status=open.
+        #    So call that. However, handle_dm_request() needs an Interaction to respond if needed.
+        #    We'll do it here, then interpret if it actually opened or not.
+
+        # We do NOT immediately open. We call handle_dm_request which might ask for approvals.
+        # If handle_dm_request() decides that it can open automatically, it calls add_open_dm_pair()
+        # or it might show a "AskForDMApprovalView" or respond with a denial. We need a consistent way
+        # to know if it was truly opened.
+        
+        # For simplicity, you can:
+        #  - Return right away if handle_dm_request() triggers an approval flow. 
+        #  - If the target's DMs are truly open, handle_dm_request() calls add_open_dm_pair() and
+        #    returns an ephemeral "You now have permission..." message. We'll detect that with a
+        #    DB check after handle_dm_request is done.
+
+        await self.handle_dm_request(
+            requestor=invoker,
+            target_user=target,
+            interaction=interaction
+        )
+        # Now re-check if the pair is open after handle_dm_request.
+        row2 = await self.bot.db.fetchrow(
+            """
+            SELECT active FROM open_dm_perms
+             WHERE (user1_id=$1 AND user2_id=$2) OR (user1_id=$2 AND user2_id=$1)
+            """,
+            invoker.id, target.id
+        )
+        new_open = bool(row2 and row2["active"])
+        if new_open:
+            return (True, True, f"You now have **open** DMs with {target.display_name}.")
+        else:
+            # Means it might be waiting for approval or was denied
+            return (False, False, "DM request is pending approval or was denied.")
+
+
 
     # ------------------------------------------------------------------
     # Notification of Claim Status via DM

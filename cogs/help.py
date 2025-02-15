@@ -19,11 +19,10 @@ class Help(commands.Cog):
 
     async def is_staff(self, member: discord.Member) -> bool:
         """Check if the given member is staff by querying staff_roles in DB."""
-        staff_roles = await self.bot.db.fetch("SELECT role_id FROM staff_roles;")
-        staff_role_ids = [r["role_id"] for r in staff_roles]
-        if not staff_role_ids:
+        staff_roles = self.bot.config["staff_roles"]        
+        if not staff_roles:
             return False
-        return any(role.id in staff_role_ids for role in member.roles)
+        return any(role.name in staff_roles for role in member.roles)
 
     def is_staff_command(self, cmd: commands.Command) -> bool:
         """
@@ -33,12 +32,10 @@ class Help(commands.Cog):
         
         Adjust this logic if you have a more robust way to mark staff commands.
         """
-        # Identify command's top-level group name (if any)
-        # For slash commands, the command hierarchy is in cmd.full_parent_name or cmd.root_parent.
-        # We can inspect cmd.extras or cmd.__dict__ as well if we had annotations.
-        # For simplicity, we check command or its parents name.
+        
         parents = []
         cur = cmd
+        logger.debug(f"[DEBUG] command {cmd}")
         while hasattr(cur, 'parent') and cur.parent is not None:
             parents.append(cur.parent.name)
             cur = cur.parent

@@ -1,5 +1,3 @@
-# auction.py
-
 import discord
 from discord.ext import commands, tasks
 from discord.commands import SlashCommandGroup

@@ -137,7 +137,7 @@ class SingleUserOwnershipView(discord.ui.View):
       - Request DMs / Close DMs
       - Propose Claim (enabled only if conditions are met)
     """
-    def __init__(self, bot: commands.Bot, target_user: discord.Member, timeout: Optional[float] = None, message_id: int = 0):
+    def __init__(self, bot: commands.Bot, target_user: discord.Member, viewer_user: discord.Member, timeout: Optional[float] = None, message_id: int = 0):
         """
         Initializes the DM-based view.
         
@@ -149,10 +149,40 @@ class SingleUserOwnershipView(discord.ui.View):
         super().__init__(timeout=timeout)
         self.bot = bot
         self.target_user = target_user
-        # If the view is reattached, use the provided message_id.
+        self.viewer_user = viewer_user
         self.message_id = message_id  
         self.dms_active = False
         self.propose_claim_enabled = False
+
+    async def refresh_button_label(self):
+            """Check DB and update the button label, then re‐edit the original DM."""
+            # 1) Figure out if your DM is open or not
+            row = await self.bot.db.fetchrow(
+                """
+                SELECT active FROM open_dm_perms
+                 WHERE (user1_id=$1 AND user2_id=$2) OR (user1_id=$2 AND user2_id=$1);
+                """,
+                # If you need the "viewer" or "invoker" ID, you might store that in the DB table
+                # or pass it in. If you only track the target_user in your constructor,
+                # you may need more logic here. For simplicity, assume you know the "viewer" or use
+                # message.author_id if you're only dealing with your own DM.
+                self.target_user.id, self.viewer_user.id 
+            )
+            dm_is_open = bool(row and row["active"])
+
+            # 2) Update the button label
+            request_dm_button = self.get_item("singleuser_request_DMs")
+            if request_dm_button is not None:
+                request_dm_button.label = "Close DMs" if dm_is_open else "Request DMs"
+
+            # 3) Re‐edit the DM to reflect the updated label
+            try:
+                # Make sure you can fetch the DM channel for the relevant user
+                dm_channel = await self.viewer_user.create_dm()
+                msg = await dm_channel.fetch_message(self.message_id)
+                await msg.edit(view=self)
+            except Exception as e:
+                print(f"Failed to refresh button label: {e}")
 
     async def update_view(self, interaction: discord.Interaction):
         """
@@ -168,6 +198,7 @@ class SingleUserOwnershipView(discord.ui.View):
             """,
             interaction.user.id, self.target_user.id
         )
+        logger.debug(f"{interaction}")
         self.dms_active = bool(dm_row and dm_row["active"])
 
         # Update the "Request DMs" button label accordingly.
@@ -209,29 +240,29 @@ class SingleUserOwnershipView(discord.ui.View):
 
     @discord.ui.button(label="Request DMs", style=discord.ButtonStyle.primary, custom_id="singleuser_request_DMs")
     async def request_dm_btn(self, button: discord.ui.Button, interaction: discord.Interaction):
-        """
-        Triggered when the "Request DMs" button is clicked.
-        If DMs are already active, closes them; otherwise, initiates a DM request.
-        Then updates the view to reflect the new state.
-        """
+        # Defer right away, so we won't blow up if we call something else that responds.
+        await interaction.response.defer(ephemeral=True)
+
         cog = self.bot.get_cog("OwnershipCog")
         if not cog:
             return
 
-        if self.dms_active:
-            # Close DM permission.
-            await cog.close_dm_pair(interaction.user.id, self.target_user.id, reason="user_closed_via_single_view")
-            await interaction.response.send_message(f"You have **closed** DMs with {self.target_user.display_name}.", ephemeral=True)
-        else:
-            # Initiate a DM request.
-            await cog.handle_dm_request(
-                requestor=interaction.user,
-                target_user=self.target_user,
-                interaction=interaction,
-                view_to_disable_button=self
-            )
+        # toggle_dm_permissions calls handle_dm_request which might have responded, 
+        # but we have already “deferred,” so that’s okay. The library sees our 
+        # initial deferral as the “first response.”
+        did_change, is_open, msg = await cog.toggle_dm_permissions(
+            invoker=interaction.user,
+            target=self.target_user,
+            interaction=interaction,
+            reason="user_toggle_via_single_view"
+        )
 
+        # Now we can do a follow-up message:
+        await interaction.followup.send(msg, ephemeral=True)
+
+        # Or just do your self.update_view if you want to re-edit a message:
         await self.update_view(interaction)
+
 
     @discord.ui.button(label="Propose Claim", style=discord.ButtonStyle.blurple, custom_id="singleuser_propose_claim")
     async def propose_claim_btn(self, button: discord.ui.Button, interaction: discord.Interaction):
@@ -478,17 +509,13 @@ class OwnershipBrowserView(discord.ui.View):
         self.add_item(self.user_select)
 
     @discord.ui.button(
-        label="Request DMs",
-        style=discord.ButtonStyle.primary,
-        emoji="💬",
-        row=2,
-        custom_id="browseview_request_dm_btn"
+    label="Request DMs",
+    style=discord.ButtonStyle.primary,
+    emoji="💬",
+    row=2,
+    custom_id="browseview_request_dm_btn"
     )
     async def request_dm_btn(self, button: discord.ui.Button, interaction: discord.Interaction):
-        """
-        Called when the "Request DMs" button is clicked in the browser view.
-        Toggles between requesting and closing DMs based on current permissions.
-        """
         if not self.current_user_id:
             return await interaction.response.send_message("Select a user first!", ephemeral=True)
 
@@ -500,28 +527,25 @@ class OwnershipBrowserView(discord.ui.View):
         if not cog:
             return
 
-        row = await self.bot.db.fetchrow(
-            """
-            SELECT active FROM open_dm_perms
-            WHERE (user1_id=$1 AND user2_id=$2) OR (user1_id=$2 AND user2_id=$1);
-            """,
-            interaction.user.id, target_member.id
+        # Use the new unified method
+        did_change, is_open, msg = await cog.toggle_dm_permissions(
+            invoker=interaction.user,
+            target=target_member,
+            interaction=interaction,
+            reason="user_toggle_via_browseview"
         )
-        if row and row["active"]:
-            # Close DM permissions.
-            await cog.close_dm_pair(interaction.user.id, target_member.id, reason="user_closed_via_browseview")
-            await interaction.response.send_message(f"You have **closed** DMs with {target_member.display_name}.", ephemeral=True)
-            button.label = "Request DMs"
-            button.disabled = False
+
+        # Show the ephemeral message returned
+        await interaction.response.send_message(msg, ephemeral=True)
+
+        # Optionally, update the button label right away, if ephemeral is still active
+        button.label = "Close DMs" if is_open else "Request DMs"
+        button.disabled = False
+        # Attempt to edit if ephemeral is still valid
+        try:
             await interaction.edit_original_response(view=self)
-        else:
-            # Request DM permissions.
-            await cog.handle_dm_request(
-                requestor=interaction.user,
-                target_user=target_member,
-                interaction=interaction,
-                view_to_disable_button=self
-            )
+        except discord.HTTPException:
+            pass  # ephemeral might be gone or "Interaction has already been acknowledged"
 
     @discord.ui.button(
         label="Transact",
